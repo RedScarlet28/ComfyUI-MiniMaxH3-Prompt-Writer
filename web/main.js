@@ -45,6 +45,7 @@ import { addHistory, clearHistory, deleteHistory, fetchHistoryFile, listHistory,
 import { createPromptTabs, tabLabel, tabsBarMarkup, videoModeDrafts } from "./prompt_tabs.js";
 
 import { editMedia } from "./api/h3studio.js";
+import { bindSogni, sogniActionsMarkup } from "./sogni.js";
 
 const EXTENSION_NAME = "minimax.h3.prompt.studio";
 const LAUNCHER_SCHEMA_VERSION = "2";
@@ -365,6 +366,7 @@ const STYLE_MODULES = [
   "sequence",
   "library",
   "tabs",
+  "sogni",
 ];
 
 function injectStyles() {
@@ -1018,6 +1020,19 @@ function recordPromptHistory(prompt, source = null) {
   });
 }
 
+function sogniTabItem(tab) {
+  const draft = tab.modeDrafts?.[tab.mode] || {};
+  return {
+    prompt: draft.prompt || "",
+    mode: tab.mode,
+    session_id: tab.sessionId,
+    duration: tab.durationSeconds,
+    aspect_ratio: tab.aspectRatio,
+    title: tabLabel(tab, draft.brief),
+    tab_id: tab.id,
+  };
+}
+
 function captureActiveTab() {
   saveCurrentModeDraft();
   return {
@@ -1165,6 +1180,7 @@ async function runQueuedTab(tab) {
     studio.tabs.setStatus(tab.id, studio.tabs.active === tab ? "idle" : "done");
     studio.tabs.save();
     completed = true;
+    studio.sogni?.promptReady(sogniTabItem(tab));
     showToast("Prompt ready", `${tabLabel(tab)} · ${tab.mode} · ${result.total_seconds.toFixed(1)}s`, null,
       studio.tabs.active === tab ? null : { label: "Open tab", onClick: () => studio.tabs.select(tab.id) });
   } catch (error) {
@@ -1287,6 +1303,7 @@ function restoreModeDraft(mode) {
 
 function syncWorkspace() {
   if (!studio) return;
+  studio.sogni?.syncAvailability();
   const music = studio.mode === "Music3";
   studio.root.classList.toggle("is-music", music);
   studio.root.querySelectorAll("[data-workspace]").forEach((button) => {
@@ -3562,7 +3579,10 @@ function createStudio() {
             <span class="h3ps-output-primary-actions">
               <button class="h3ps-secondary-button" type="button" title="Refine with local LLM" data-refine-toggle>${icon("spark", 15)} Refine</button>
             </span>
-            ${copyButtonMarkup(icon, "data-copy", '<span data-copy-label>Copy prompt</span>')}
+            <span class="h3ps-output-secondary-actions">
+              ${sogniActionsMarkup()}
+              ${copyButtonMarkup(icon, "data-copy", '<span data-copy-label>Copy prompt</span>')}
+            </span>
           </div>
         </section>
       </div>
@@ -4098,6 +4118,23 @@ function createStudio() {
     showToast("Edits undone", "Restored the latest AI-generated prompt.");
   });
   root.querySelector("[data-copy]").addEventListener("click", () => copyPromptText(root.querySelector("[data-output]").value, studio.mode === "Music3"));
+  studio.sogni = bindSogni({
+    root,
+    getContext: () => ({
+      prompt: root.querySelector("[data-output]").value,
+      mode: studio.sequence?.active ? "Sequence" : studio.mode,
+      session_id: studio.sessionId,
+      duration: studio.durationSeconds,
+      aspect_ratio: studio.aspectRatio,
+      title: studio.tabs?.active ? tabLabel(studio.tabs.active, currentBriefTextarea().value) : "",
+      tab_id: studio.tabs?.active?.id || null,
+    }),
+    collectTabs: () => {
+      if (studio.tabs?.active) Object.assign(studio.tabs.active, captureActiveTab());
+      return (studio.tabs?.tabs || []).map(sogniTabItem).filter((item) => item.prompt.trim());
+    },
+    showToast,
+  });
   root.querySelector("[data-output]").addEventListener("input", () => {
     syncModifiedState();
     renderPromptHighlights();

@@ -1,0 +1,57 @@
+.h3ps-output-secondary-actions { display:flex; align-items:center; gap:calc(7px * var(--h3ps-interface-scale)); }
+.h3ps-sogni-actions { position:relative; display:inline-flex; align-items:center; gap:calc(4px * var(--h3ps-interface-scale)); }
+.h3ps-root .h3ps-sogni-send:disabled { opacity:.45; cursor:not-allowed; }
+
+.h3ps-sogni-network { display:inline-flex; height:calc(28px * var(--h3ps-interface-scale)); padding:2px; border:1px solid var(--h3ps-border-soft, var(--h3ps-border)); border-radius:var(--h3ps-radius-sm); background:var(--h3ps-field); }
+.h3ps-sogni-network button { padding:0 calc(8px * var(--h3ps-interface-scale)); border:0; border-radius:4px; background:transparent; color:var(--h3ps-muted); font-size:var(--h3ps-font-label); font-weight:600; cursor:pointer; }
+.h3ps-sogni-network button[aria-pressed="true"] { background:var(--h3ps-accent-soft); color:var(--h3ps-accent-strong); }
+
+.h3ps-sogni-queue-toggle, .h3ps-root .h3ps-sogni-lora-toggle { position:relative; }
+.h3ps-root .h3ps-sogni-lora-toggle { width:auto; padding:0 calc(7px * var(--h3ps-interface-scale)); font-size:var(--h3ps-font-label); font-weight:700; }
+.h3ps-sogni-queue-toggle b, .h3ps-sogni-lora-toggle b { position:absolute; top:-4px; right:-4px; min-width:15px; height:15px; padding:0 4px; border-radius:8px; background:var(--h3ps-accent); color:#fff; font-size:9px; line-height:15px; text-align:center; }
+.h3ps-sogni-queue-toggle b[hidden], .h3ps-sogni-lora-toggle b[hidden] { display:none; }
+
+.h3ps-sogni-panel { position:absolute; right:0; bottom:calc(100% + 8px); z-index:30; display:grid; gap:calc(9px * var(--h3ps-interface-scale)); width:calc(330px * var(--h3ps-interface-scale)); max-height:min(70vh, 640px); overflow:auto; padding:calc(13px * var(--h3ps-interface-scale)); border:1px solid var(--h3ps-border-soft, var(--h3ps-border)); border-radius:var(--h3ps-radius-md); background:var(--h3ps-popover, var(--h3ps-field)); box-shadow:0 12px 32px rgba(0,0,0,.35); }
+.h3ps-sogni-panel[hidden] { display:none; }
+.h3ps-sogni-panel > strong { color:var(--h3ps-text-emphasis); font-size:var(--h3ps-font-subheading); }
+.h3ps-sogni-panel label { display:grid; gap:calc(4px * var(--h3ps-interface-scale)); color:var(--h3ps-muted); font-size:var(--h3ps-font-label); }
+.h3ps-sogni-panel input:not([type="checkbox"]), .h3ps-sogni-panel select { height:calc(30px * var(--h3ps-interface-scale)); padding:0 calc(8px * var(--h3ps-interface-scale)); border:1px solid var(--h3ps-border-input); border-radius:var(--h3ps-radius-sm); background:var(--h3ps-field); color:var(--h3ps-text-input); font-size:var(--h3ps-font-control); }
+.h3ps-sogni-panel small { color:var(--h3ps-muted); font-size:var(--h3ps-font-caption); line-height:1.4; }
+.h3ps-sogni-grid { display:grid; grid-template-columns:1fr 1fr; gap:calc(8px * var(--h3ps-interface-scale)); }
+.h3ps-sogni-panel .h3ps-sogni-check { grid-template-columns:auto 1fr; align-items:start; gap:8px; color:var(--h3ps-text-control, var(--h3ps-canvas-text)); }
+.h3ps-sogni-check span { display:grid; gap:2px; }
+.h3ps-sogni-panel-actions { display:flex; align-items:center; justify-content:space-between; }
+
+.h3ps-sogni-queue { width:calc(420px * var(--h3ps-interface-scale)); }
+.h3ps-sogni-queue-head { display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
+.h3ps-sogni-queue-head strong { color:var(--h3ps-text-emphasis); font-size:var(--h3ps-font-subheading); }
+.h3ps-sogni-queue-tools { display:flex; align-items:center; gap:8px; }
+.h3ps-sogni-queue-tools .h3ps-text-button:last-child { margin-left:auto; }
+.h3ps-sogni-banner { margin:0; padding:7px 9px; border-radius:var(--h3ps-radius-sm); background:rgba(223,169,79,.12); color:var(--h3ps-warning); font-size:var(--h3ps-font-caption); line-height:1.4; }
+.h3ps-sogni-banner.is-error { background:rgba(237,128,109,.12); color:var(--h3ps-danger); }
+.h3ps-sogni-banner code { user-select:all; }
+.h3ps-sogni-empty { margin:6px 0; color:var(--h3ps-muted); font-size:var(--h3ps-font-caption); }
+.h3ps-sogni-jobs { display:grid; gap:6px; margin:0; padding:0; list-style:none; }
+.h3ps-sogni-job { display:grid; gap:3px; padding:8px 9px; border:1px solid var(--h3ps-border-soft, var(--h3ps-border)); border-radius:var(--h3ps-radius-sm); background:var(--h3ps-field); }
+.h3ps-sogni-job > div:first-child { display:flex; align-items:center; gap:7px; min-width:0; }
+.h3ps-sogni-job strong { overflow:hidden; color:var(--h3ps-text-control, var(--h3ps-canvas-text)); font-size:var(--h3ps-font-caption); white-space:nowrap; text-overflow:ellipsis; }
+.h3ps-sogni-chip { flex:0 0 auto; padding:1px 6px; border-radius:8px; background:rgba(255,255,255,.07); color:var(--h3ps-muted); font-size:var(--h3ps-font-caption-xs); font-weight:700; text-transform:uppercase; letter-spacing:.03em; }
+.h3ps-sogni-job.is-active .h3ps-sogni-chip, .h3ps-sogni-job.is-submitting .h3ps-sogni-chip { background:var(--h3ps-accent-soft); color:var(--h3ps-accent-strong); }
+.h3ps-sogni-job.is-completed .h3ps-sogni-chip { background:rgba(107,201,154,.14); color:var(--h3ps-green); }
+.h3ps-sogni-job.is-failed .h3ps-sogni-chip { background:rgba(237,128,109,.14); color:var(--h3ps-danger); }
+.h3ps-sogni-job-note { color:var(--h3ps-warning) !important; }
+.h3ps-sogni-job.is-failed .h3ps-sogni-job-note { color:var(--h3ps-danger) !important; }
+.h3ps-sogni-job-actions { display:flex; gap:6px; justify-content:flex-end; }
+.h3ps-sogni-job-actions button { height:22px; padding:0 8px; border:1px solid var(--h3ps-border-soft, var(--h3ps-border)); border-radius:4px; background:transparent; color:var(--h3ps-text-control, var(--h3ps-canvas-text)); font-size:var(--h3ps-font-caption-xs); cursor:pointer; }
+.h3ps-sogni-job-actions button:hover { border-color:var(--h3ps-accent); }
+
+.h3ps-sogni-loras { width:calc(380px * var(--h3ps-interface-scale)); }
+.h3ps-sogni-lora-list { display:grid; gap:5px; margin:0; padding:0; list-style:none; }
+.h3ps-sogni-lora { display:grid; gap:4px; padding:6px 8px; border:1px solid var(--h3ps-border-soft, var(--h3ps-border)); border-radius:var(--h3ps-radius-sm); background:var(--h3ps-field); }
+.h3ps-sogni-lora.is-on { border-color:var(--h3ps-accent); }
+.h3ps-sogni-panel .h3ps-sogni-lora > label { display:flex; align-items:center; gap:7px; min-width:0; cursor:pointer; }
+.h3ps-sogni-lora strong { overflow:hidden; color:var(--h3ps-text-control, var(--h3ps-canvas-text)); font-size:var(--h3ps-font-caption); font-weight:600; white-space:nowrap; text-overflow:ellipsis; }
+.h3ps-sogni-tag { flex:0 0 auto; padding:0 5px; border-radius:6px; background:rgba(255,255,255,.07); color:var(--h3ps-muted); font-size:var(--h3ps-font-caption-xs); }
+.h3ps-sogni-lora-strength { display:grid; grid-template-columns:1fr 3.2em; align-items:center; gap:8px; }
+.h3ps-sogni-lora-strength input { width:100%; accent-color:var(--h3ps-accent); }
+.h3ps-sogni-lora-strength output { color:var(--h3ps-text-control, var(--h3ps-canvas-text)); font-size:var(--h3ps-font-caption); text-align:right; }

@@ -34,6 +34,7 @@ from .runtime_diagnostics import get_gguf_runtime_diagnostics
 from .system_prompts import SystemPromptError, system_prompt_for_mode
 from .version import VERSION
 from .sequence_routes import register_sequence_routes
+from .sogni_routes import register_sogni_routes
 
 
 ROUTE_PREFIX = "/h3studio"
@@ -1424,3 +1425,4 @@ async def history_file(request: web.Request) -> web.StreamResponse:
 
 
 register_sequence_routes(routes, sys.modules[__name__])
+register_sogni_routes(routes, ROUTE_PREFIX)
