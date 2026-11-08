@@ -215,11 +215,18 @@ export function createPromptLibrary(options) {
     if (open) renderPrefillMenu();
     prefillMenu.hidden = !open;
     prefillMenu.classList.remove("is-up");
+    prefillMenu.style.maxHeight = "";
     if (open) {
+      // The input panel scrolls and clips, so keep the menu inside its visible box.
       const bounds = (prefillMenu.closest(".h3ps-input-panel") || root).getBoundingClientRect();
       const menu = prefillMenu.getBoundingClientRect();
       const toggle = prefillToggle.getBoundingClientRect();
-      if (menu.bottom > bounds.bottom && toggle.top - bounds.top > bounds.bottom - toggle.bottom) prefillMenu.classList.add("is-up");
+      const below = bounds.bottom - toggle.bottom - 10;
+      const above = toggle.top - bounds.top - 10;
+      const up = menu.height > below && above > below;
+      prefillMenu.classList.toggle("is-up", up);
+      const room = up ? above : below;
+      if (menu.height > room) prefillMenu.style.maxHeight = `${Math.max(120, room)}px`;
     }
     prefillToggle.setAttribute("aria-expanded", String(open));
     if (!open && restoreFocus) prefillToggle.focus();
