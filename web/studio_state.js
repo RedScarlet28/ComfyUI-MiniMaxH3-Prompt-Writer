@@ -162,7 +162,7 @@ export function safeApiSampling(value, allowed = API_SAMPLING_FIELDS.map(({ name
 export function loadApiProviderConfig(storage = globalThis.localStorage) {
   try {
     const value = JSON.parse(storage?.getItem(API_PROVIDER_STORAGE_KEY) || "null");
-    if (!value || !["openai", "gemini", "openrouter", "custom"].includes(value.preset)) return null;
+    if (!value || !["openai", "gemini", "openrouter", "nanogpt", "custom"].includes(value.preset)) return null;
     return {
       preset: value.preset,
       base_url: typeof value.base_url === "string" ? value.base_url : "",

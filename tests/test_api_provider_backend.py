@@ -412,6 +412,38 @@ class ApiProviderBackendTests(unittest.TestCase):
         with self.assertRaises(ModelError):
             normalize_api_base_url("custom", "http://8.8.8.8:1234/v1")
 
+    def test_nanogpt_preset_reads_detailed_model_list(self):
+        self.assertEqual(normalize_api_base_url("nanogpt", "https://ignored.example/v1"), "https://api.nano-gpt.com/api/v1")
+        response = {"object": "list", "data": [
+            {"id": "openai/gpt-vision", "context_length": 400000, "max_output_tokens": 128000,
+             "capabilities": {"vision": True, "reasoning": True}, "pricing": {"prompt": 2, "completion": 10}},
+            {"id": "text/only", "context_length": None, "capabilities": {"vision": False, "reasoning": False}},
+        ]}
+        with patch.object(self.backend, "_request_json", return_value=(response, {})) as request:
+            result = self.backend.probe({"preset": "nanogpt", "model_id": "openai/gpt-vision",
+                                         "credential": {"source": "session", "value": "nano-key-1234"}})
+        request.assert_called_once()
+        self.assertEqual(request.call_args.args[1:], ("GET", "/api/v1/models?detailed=true"))
+        vision, text = result["models"]
+        self.assertEqual(result["model"]["remote_model"], "openai/gpt-vision")
+        self.assertTrue(vision["capabilities"]["images"] and vision["thinking"])
+        self.assertEqual((vision["model_context_limit"], vision["max_output_tokens"]), (400000, 128000))
+        self.assertEqual(vision["capability_source"], "official_metadata")
+        self.assertFalse(text["capabilities"]["images"] or text["thinking"])
+        self.assertEqual(vision["sampling_parameters"], ["temperature", "top_p", "frequency_penalty", "presence_penalty"])
+        self.assertEqual(result["connection"]["provider_name"], "NanoGPT")
+        self.assertNotIn("nano-key-1234", json.dumps(result))
+        with self.assertRaises(ModelError) as raised:
+            self.backend.probe({"preset": "nanogpt", "credential": {"source": "session", "value": ""}})
+        self.assertEqual(raised.exception.code, "API_CREDENTIAL_MISSING")
+
+    def test_nanogpt_stream_requests_usage(self):
+        _ApiChatHandler(self.backend, self._connection(preset="nanogpt"), "openai/gpt-vision")(
+            messages=[], temperature=0.2, top_p=0.5, top_k=12, max_tokens=30, seed=None, thinking=True)
+        payload = _FakeApiHandler.requests[-1][3]
+        self.assertEqual(payload["stream_options"], {"include_usage": True})
+        self.assertNotIn("reasoning", payload)
+
     def test_loopback_custom_enriches_lm_studio_vision_metadata(self):
         result = self.backend.probe({
             "preset": "custom",

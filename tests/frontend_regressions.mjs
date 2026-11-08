@@ -1304,7 +1304,7 @@ test("Settings separates providers, installed models, diagnostics, and verified 
   assert.match(mainSource, /setTimeout\(\(\) => refreshOllama\(\{ automatic: true \}\), 4000\)/);
   assert.match(mainSource, /data-provider-icon="external"/);
   assert.match(mainSource, /data-provider-icon="ollama"/);
-  for (const providerIcon of ["api-gemini", "api-openai", "api-openrouter", "api-custom"]) {
+  for (const providerIcon of ["api-gemini", "api-openai", "api-openrouter", "api-nanogpt", "api-custom"]) {
     assert.match(mainSource, new RegExp(`icon: "${providerIcon}"`));
     assert.match(skinSource, new RegExp(`data-provider-icon="${providerIcon}"`));
   }

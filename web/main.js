@@ -2180,6 +2180,7 @@ const API_PROVIDER_UI = {
   gemini: { name: "Gemini", icon: "api-gemini", note: "Google API", keyUrl: "https://aistudio.google.com/api-keys" },
   openai: { name: "OpenAI", icon: "api-openai", note: "OpenAI API", keyUrl: "https://platform.openai.com/api-keys" },
   openrouter: { name: "OpenRouter", icon: "api-openrouter", note: "Multi-provider gateway", keyUrl: "https://openrouter.ai/settings/keys" },
+  nanogpt: { name: "NanoGPT", icon: "api-nanogpt", note: "Pay-per-use gateway", keyUrl: "https://nano-gpt.com/api" },
   custom: { name: "Custom", icon: "api-custom", note: "Generic OpenAI-compatible", keyUrl: null },
 };
 
@@ -2235,7 +2236,7 @@ function renderApiProviderControl() {
       <span class="h3ps-provider-icon" data-provider-icon="${provider.icon}" aria-hidden="true"></span><span><strong>${provider.name}</strong><small>${provider.note}</small></span>${icon("check", 13)}
     </button>`).join("");
   const header = `<header class="h3ps-settings-section-heading"><span><small>OpenAI-compatible</small><strong>API providers</strong></span></header>`;
-  const disclosure = `<div class="h3ps-api-disclosure"><strong>What leaves this computer</strong><p>The provider receives your brief, H3 instructions, prepared images and one derived contact sheet per video in the current manifest. Original videos and audio bytes are not uploaded.</p>${config.preset === "openrouter" ? "<small>OpenRouter forwards the request to an upstream model provider with its own data policy.</small>" : ""}</div>`;
+  const disclosure = `<div class="h3ps-api-disclosure"><strong>What leaves this computer</strong><p>The provider receives your brief, H3 instructions, prepared images and one derived contact sheet per video in the current manifest. Original videos and audio bytes are not uploaded.</p>${["openrouter", "nanogpt"].includes(config.preset) ? `<small>${selectedPreset.name} forwards the request to an upstream model provider with its own data policy.</small>` : ""}</div>`;
   const policyLinks = [
     providerMetadata.pricing_url ? `<a href="${escapeHtml(providerMetadata.pricing_url)}" target="_blank" rel="noopener noreferrer">Pricing ↗</a>` : "",
     providerMetadata.privacy_url ? `<a href="${escapeHtml(providerMetadata.privacy_url)}" target="_blank" rel="noopener noreferrer">Data policy ↗</a>` : "",

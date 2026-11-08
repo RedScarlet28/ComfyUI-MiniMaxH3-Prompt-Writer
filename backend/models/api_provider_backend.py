@@ -67,6 +67,15 @@ PRESETS: dict[str, dict[str, Any]] = {
         "default_images": False,
         "thinking": False,
     },
+    "nanogpt": {
+        "name": "NanoGPT",
+        "base_url": "https://api.nano-gpt.com/api/v1",
+        "key_url": "https://nano-gpt.com/api",
+        "privacy_url": None,
+        "pricing_url": "https://nano-gpt.com/models/text",
+        "default_images": False,
+        "thinking": False,
+    },
     "custom": {
         "name": "Custom",
         "base_url": None,
@@ -100,7 +109,7 @@ def _is_private_lan(hostname: str) -> bool:
 
 def normalize_api_base_url(preset: str, value: str | None = None) -> str:
     if preset not in PRESETS:
-        raise ModelError("API_PRESET_INVALID", "Choose OpenAI, Gemini, OpenRouter, or Custom.")
+        raise ModelError("API_PRESET_INVALID", "Choose OpenAI, Gemini, OpenRouter, NanoGPT, or Custom.")
     fixed = PRESETS[preset]["base_url"]
     raw = str(fixed if fixed is not None else value or "").strip().rstrip("/")
     if not raw:
@@ -189,7 +198,7 @@ class _ApiChatHandler:
             "stream": True,
         }
         preset = self.connection.preset
-        if preset in {"openai", "gemini", "openrouter"}:
+        if preset in {"openai", "gemini", "openrouter", "nanogpt"}:
             payload["stream_options"] = {"include_usage": True}
         if preset == "openai":
             payload["store"] = False
@@ -443,6 +452,10 @@ class ApiProviderBackend:
             value = entry.get("input_modalities") or entry.get("modalities")
         if isinstance(value, list):
             return {str(item).lower() for item in value}
+        # NanoGPT's detailed model list reports image input as capabilities.vision.
+        capabilities = entry.get("capabilities")
+        if isinstance(capabilities, dict) and isinstance(capabilities.get("vision"), bool):
+            return {"text", "image"} if capabilities["vision"] else {"text"}
         return None
 
     def _model_info(self, connection: ApiConnection, entry: dict[str, Any] | str) -> dict[str, Any]:
@@ -466,8 +479,11 @@ class ApiProviderBackend:
         supported_parameters = item.get("supported_parameters")
         parameter_set = {str(value) for value in supported_parameters} if isinstance(supported_parameters, list) else set()
         reasoning = item.get("reasoning")
+        capabilities = item.get("capabilities")
         if connection.preset == "openrouter":
             thinking = isinstance(reasoning, dict) or "reasoning" in parameter_set
+        elif connection.preset == "nanogpt":
+            thinking = isinstance(capabilities, dict) and capabilities.get("reasoning") is True
         else:
             thinking = bool(PRESETS[connection.preset]["thinking"])
         context_tokens = self._context_limit(item) or connection.custom_context_tokens
@@ -551,7 +567,9 @@ class ApiProviderBackend:
 
     def _fetch_models(self, connection: ApiConnection, *, allow_missing: bool = False) -> list[dict[str, Any]]:
         try:
-            data, _headers = self._request_json(connection, "GET", _api_path(connection.base_url, "models"))
+            # NanoGPT only reports context limits and vision support in detailed mode.
+            suffix = "models?detailed=true" if connection.preset == "nanogpt" else "models"
+            data, _headers = self._request_json(connection, "GET", _api_path(connection.base_url, suffix))
         except ModelError as error:
             if allow_missing and error.code == "API_MODEL_NOT_FOUND":
                 return []

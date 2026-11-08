@@ -25,7 +25,12 @@ def sampling_parameters(preset: str, declared: Any, *, anthropic: bool = False) 
         return [name for name in SAMPLING_LIMITS if name in declared]
     # Generic compatible servers have no standard capability discovery. Overrides
     # are explicitly opt-in; their documentation remains authoritative.
-    return list(SAMPLING_LIMITS) if preset == "custom" else []
+    if preset == "custom":
+        return list(SAMPLING_LIMITS)
+    # NanoGPT's model list has no per-model parameter list; its chat endpoint documents these.
+    if preset == "nanogpt":
+        return ["temperature", "top_p", "frequency_penalty", "presence_penalty"]
+    return []
 
 
 def validate_sampling(value: Any, allowed: list[str]) -> dict[str, float | int]:

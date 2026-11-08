@@ -1,6 +1,6 @@
 # API providers
 
-API providers use one OpenAI-compatible Chat Completions backend with presets for Gemini, OpenAI, OpenRouter, and Custom endpoints.
+API providers use one OpenAI-compatible Chat Completions backend with presets for Gemini, OpenAI, OpenRouter, NanoGPT, and Custom endpoints.
 
 ![API provider settings](assets/v0.3/api-providers.png)
 
@@ -9,6 +9,7 @@ API providers use one OpenAI-compatible Chat Completions backend with presets fo
 - **Gemini** uses Google's OpenAI-compatible endpoint and exposes Gemini Thinking levels.
 - **OpenAI** uses the OpenAI API preset.
 - **OpenRouter** sends requests through OpenRouter to an upstream model provider.
+- **NanoGPT** sends requests through NanoGPT (`https://api.nano-gpt.com/api/v1`) to an upstream model provider. Vision, reasoning, and context limits come from its detailed model list; temperature, top_p, and the two penalties can be overridden.
 - **Custom** accepts a generic OpenAI-compatible URL, including local LM Studio.
 
 Gemini was validated live. The shared Custom transport was validated live with LM Studio. OpenAI and OpenRouter contract tests cover request serialization, model listing, streaming, cancellation, errors, and secret handling, but no credentialed live smoke was run for those two services.

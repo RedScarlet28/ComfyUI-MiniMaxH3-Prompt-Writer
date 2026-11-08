@@ -205,6 +205,7 @@
 .h3ps-provider-icon[data-provider-icon="api-gemini"] { --h3ps-provider-icon: url("../assets/icons/gemini.svg"); }
 .h3ps-provider-icon[data-provider-icon="api-openai"] { --h3ps-provider-icon: url("../assets/icons/openai.svg"); }
 .h3ps-provider-icon[data-provider-icon="api-openrouter"] { --h3ps-provider-icon: url("../assets/icons/openrouter.svg"); }
+.h3ps-provider-icon[data-provider-icon="api-nanogpt"] { --h3ps-provider-icon: url("../assets/icons/nanogpt.svg"); }
 .h3ps-provider-icon[data-provider-icon="api-custom"] { --h3ps-provider-icon: url("../assets/icons/custom.svg"); }
 .h3ps-provider-selector > button.is-selected .h3ps-provider-icon { color: var(--h3ps-text); }
 
