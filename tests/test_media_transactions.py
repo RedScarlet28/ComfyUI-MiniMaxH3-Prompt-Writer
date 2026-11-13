@@ -40,6 +40,29 @@ class MediaTransactionTests(unittest.TestCase):
             self.assertTrue((root / "first").exists())
             self.assertEqual([asset["id"] for asset in remaining], ["first"])
 
+    def test_sessions_are_restored_after_restart(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache_root = Path(directory)
+            (cache_root / "session").mkdir()
+            kept = self.asset(cache_root / "session", "kept", "I2VA", "image", "Start image")
+            gone = self.asset(cache_root / "session", "gone", "Reference", "image", "<Picture 1>")
+            orphan = cache_root / "half-uploaded"
+            orphan.mkdir()
+            with patch.object(media, "CACHE_ROOT", cache_root):
+                store = media.MediaStore()
+                store.sessions["session"] = [kept, gone]
+                store.touch("session", now=123.0)
+                store.save()
+                Path(gone["_original_path"]).unlink()
+
+                restarted = media.MediaStore()
+                restarted.load()
+
+            self.assertEqual([asset["id"] for asset in restarted.sessions["session"]], ["kept"])
+            self.assertEqual(restarted.last_accessed["session"], 123.0)
+            self.assertFalse(orphan.exists())
+            self.assertTrue((cache_root / "session").exists())
+
     def test_expire_sessions_removes_only_stale_in_memory_state(self):
         with tempfile.TemporaryDirectory() as directory:
             cache_root = Path(directory)

@@ -20,7 +20,7 @@ The API provider path is not tied to Gemma 4. You can choose another multimodal 
 
 1. Open **H3 Prompt Writer > Settings > API providers**.
 2. Choose a preset.
-3. Paste the API key for the current Writer session. Custom endpoints may be used without a key.
+3. Paste the API key. Leave it blank to reuse a key saved by an earlier connection. Custom endpoints may be used without a key.
 4. Optionally enter an exact Model ID before connecting.
 5. Select **Connect & test**, then choose a vision-capable model from the provider list or enter its exact ID.
 
@@ -71,7 +71,7 @@ Sampling values are saved locally with the API configuration. Changing the model
 
 ## Keys and saved settings
 
-The key is sent once to the local H3 backend and held only in the current Writer backend process's memory. It is not read from environment variables and is not written to browser storage, model settings, developer notes, or request content. The backend uses it only to authenticate provider requests. Disconnecting removes the in-memory connection. The browser may save the preset, base URL, model ID, Gemini Thinking level, and Custom capability settings.
+After a successful connection, the backend saves the key in `ComfyUI/user/h3_prompt_writer/api_keys.json`, one entry per preset and base URL, and Writer reconnects the last provider when ComfyUI starts. The file is plain JSON on this computer; anyone who can read your ComfyUI user folder can read the key. The key is not sent back to the browser, which only shows its last four characters, and it is not written to browser storage, model settings, developer notes, or request content. **Disconnect** deletes the saved key; switching presets keeps it. The browser may save the preset, base URL, model ID, Gemini Thinking level, and Custom capability settings.
 
 ## What leaves this computer
 

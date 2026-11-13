@@ -28,7 +28,7 @@ export const getOllamaStatus = (host = null) => request(`/ollama/status${ollamaQ
 export const getApiProviderPresets = () => request("/api-provider/presets");
 export const probeApiProvider = (payload) => post("/api-provider/probe", payload);
 export const getApiProviderModels = (connectionId) => post("/api-provider/models", { connection_id: connectionId });
-export const disconnectApiProvider = (connectionId) => post("/api-provider/disconnect", { connection_id: connectionId });
+export const disconnectApiProvider = (connectionId, { forgetKey = false } = {}) => post("/api-provider/disconnect", { connection_id: connectionId, forget_key: forgetKey });
 export const getGuides = () => request("/guides");
 export const getGuide = (mode) => request(`/guides/${encodeURIComponent(mode)}`);
 export const getSystemPrompt = (mode) => request(`/system-prompt/${encodeURIComponent(mode)}`);

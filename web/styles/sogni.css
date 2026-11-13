@@ -32,7 +32,14 @@
 .h3ps-sogni-banner code { user-select:all; }
 .h3ps-sogni-empty { margin:6px 0; color:var(--h3ps-muted); font-size:var(--h3ps-font-caption); }
 .h3ps-sogni-jobs { display:grid; gap:6px; margin:0; padding:0; list-style:none; }
-.h3ps-sogni-job { display:grid; gap:3px; padding:8px 9px; border:1px solid var(--h3ps-border-soft, var(--h3ps-border)); border-radius:var(--h3ps-radius-sm); background:var(--h3ps-field); }
+.h3ps-sogni-job { display:grid; grid-template-columns:auto minmax(0, 1fr); gap:3px 0; padding:8px 9px; border:1px solid var(--h3ps-border-soft, var(--h3ps-border)); border-radius:var(--h3ps-radius-sm); background:var(--h3ps-field); }
+.h3ps-sogni-job > :not(.h3ps-sogni-thumb) { grid-column:2; }
+.h3ps-sogni-thumb { grid-column:1; grid-row:1 / span 4; align-self:start; width:56px; height:56px; margin-right:9px; border-radius:4px; object-fit:cover; background:var(--h3ps-border-soft, var(--h3ps-border)); }
+.h3ps-sogni-thumb[hidden] { display:none; }
+.h3ps-sogni-job[draggable="true"] { cursor:grab; }
+.h3ps-sogni-job.is-dragging { opacity:.45; }
+.h3ps-sogni-job.is-drop-above { box-shadow:0 -2px 0 var(--h3ps-accent); }
+.h3ps-sogni-job.is-drop-below { box-shadow:0 2px 0 var(--h3ps-accent); }
 .h3ps-sogni-job > div:first-child { display:flex; align-items:center; gap:7px; min-width:0; }
 .h3ps-sogni-job strong { overflow:hidden; color:var(--h3ps-text-control, var(--h3ps-canvas-text)); font-size:var(--h3ps-font-caption); white-space:nowrap; text-overflow:ellipsis; }
 .h3ps-sogni-chip { flex:0 0 auto; padding:1px 6px; border-radius:8px; background:rgba(255,255,255,.07); color:var(--h3ps-muted); font-size:var(--h3ps-font-caption-xs); font-weight:700; text-transform:uppercase; letter-spacing:.03em; }

@@ -1,0 +1,2 @@
+# Optional dictation for the Creative brief (Parakeet TDT 0.6B v3, int8 ONNX on the CPU).
+onnx-asr[cpu]>=0.12

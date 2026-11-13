@@ -4,7 +4,7 @@
 
 1. Open the floating **H3 Prompt Writer** button or use **Extensions > H3 Prompt Writer**.
 2. Choose a mode.
-3. Add the media required by that mode.
+3. Add the media required by that mode. Added files are kept in `ComfyUI/user/h3_prompt_writer/media` and come back with their tab after a restart. Media in a tab nobody opens for 30 days is deleted.
 4. Set duration and aspect ratio.
 5. Describe the intended video in **Creative Brief**.
 6. Choose a ready prompt model in **Settings**.
@@ -114,6 +114,12 @@ Music 3 keeps its own saved Music Brief, Lyrics, and edited caption. Open **Syst
 ## Writing a useful Creative Brief
 
 Write what should happen in ordinary language. You do not need to reproduce the official H3 prompt format. Writer builds that structure for you.
+
+### Dictation
+
+Select **Dictate** above the video Creative Brief, speak, then select **Stop**. The text goes in at the cursor, and Ctrl+Z removes it. Speech is transcribed on your computer by NVIDIA Parakeet TDT 0.6B v3, which covers English and 24 other European languages. Nothing is sent online.
+
+Dictation needs `python -m pip install -r requirements-speech.txt` in ComfyUI's environment. On first use, Writer offers a one-time download of about 640 MB into `models/speech_to_text`. The model runs on the CPU, so it does not use VRAM. The browser asks for microphone access once.
 
 Single and Sequence Creative Briefs have no character limit. The full request must still fit the model context, including guides, media, and room for the answer. Music Briefs keep their separate 2,000-character limit.
 

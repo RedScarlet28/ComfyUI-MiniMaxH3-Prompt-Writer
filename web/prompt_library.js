@@ -105,14 +105,14 @@ export function prefillPickerMarkup(icon) {
 }
 
 export function historyButtonMarkup(icon) {
-  return `<button class="h3ps-library-chip" type="button" data-history-open title="Recently generated prompts and their pictures">${icon("grid", 13)}History</button>`;
+  return `<button class="h3ps-library-chip" type="button" data-history-open title="Recently generated prompts, their pictures and rendered videos">${icon("grid", 13)}History</button>`;
 }
 
 export function historyPanelMarkup(icon) {
   return `<section class="h3ps-history" role="dialog" aria-label="Prompt history" data-history-panel hidden>
     <div class="h3ps-history-dialog">
       <header>
-        <span><strong>Prompt history</strong><small data-history-count>Loading…</small></span>
+        <span><strong>History</strong><small data-history-count>Loading…</small></span>
         <input type="search" placeholder="Search briefs and prompts" aria-label="Search history" data-history-search>
         <div class="h3ps-history-header-actions">
           <button type="button" class="h3ps-text-button" data-history-clear>Clear history</button>
@@ -121,6 +121,7 @@ export function historyPanelMarkup(icon) {
       </header>
       <nav class="h3ps-history-filters" data-history-filters>
         ${["all", ...ALL_MODES].map((mode) => `<button type="button" data-history-filter="${mode}">${mode === "all" ? "All modes" : mode}</button>`).join("")}
+        <button type="button" class="h3ps-history-gens-filter" data-history-filter="gens" title="Videos rendered with Send to Sogni">${icon("play", 11)} Gens <b data-history-gen-total></b></button>
       </nav>
       <div class="h3ps-history-list" data-history-list></div>
     </div>
@@ -153,9 +154,36 @@ function historyEntryMarkup(entry, icon) {
         <button type="button" class="h3ps-history-btn is-primary" data-history-action="load" title="Load this brief and prompt; keep the current media">Use prompt</button>
         ${pictures ? `<button type="button" class="h3ps-history-btn" data-history-action="load-media" title="Load this brief and prompt and replace this mode's media with the saved pictures">Use with pictures</button>` : ""}
         <button type="button" class="h3ps-history-btn" data-history-action="copy">${icon("copy", 12)} Copy</button>
+        ${entry.gen_count ? `<button type="button" class="h3ps-history-btn" data-history-action="gens" title="Show the videos rendered from this prompt">${icon("play", 11)} ${entry.gen_count} gen${entry.gen_count === 1 ? "" : "s"}</button>` : ""}
         <button type="button" class="h3ps-history-btn is-quiet" data-history-action="prefill" title="Save this Creative Brief as a reusable prefill">Save brief as prefill</button>
         <span></span>
         <button type="button" class="h3ps-history-btn is-quiet is-destructive" data-history-action="delete">Delete</button>
+      </footer>
+    </div>
+  </article>`;
+}
+
+export function filterGens(gens, { query = "", prompt = null } = {}) {
+  const needle = query.trim().toLowerCase();
+  return gens.filter((gen) => (prompt === null || gen.prompt === prompt)
+    && (!needle || `${gen.title || ""}\n${gen.prompt}`.toLowerCase().includes(needle)));
+}
+
+function genMarkup(gen, icon) {
+  const meta = [
+    gen.mode, gen.network === "relaxed" ? "Relaxed" : gen.network === "fast" ? "Fast" : null, gen.resolution,
+    gen.duration ? `${gen.duration}s` : null, gen.width && gen.height ? `${gen.width}×${gen.height}` : null,
+    gen.loras ? `${gen.loras} LoRA${gen.loras === 1 ? "" : "s"}` : null,
+  ].filter(Boolean).map(escapeHtml).join(" · ");
+  const title = gen.title || gen.prompt.split(/\s+/).slice(0, 8).join(" ");
+  return `<article class="h3ps-history-gen" data-history-gen="${escapeHtml(gen.id)}">
+    <video src="${escapeHtml(gen.video_url)}" preload="metadata" controls playsinline></video>
+    <div class="h3ps-history-gen-body">
+      <strong title="${escapeHtml(gen.prompt)}">${escapeHtml(title)}</strong>
+      <small>${escapeHtml(formatDate(gen.created_at))}${meta ? ` · ${meta}` : ""}</small>
+      <footer>
+        <a class="h3ps-history-btn" href="${escapeHtml(gen.video_url)}" target="_blank" rel="noopener">Open</a>
+        <button type="button" class="h3ps-history-btn" data-gen-action="copy">${icon("copy", 12)} Copy prompt</button>
       </footer>
     </div>
   </article>`;
@@ -177,7 +205,7 @@ function historyEntryMarkup(entry, icon) {
  */
 export function createPromptLibrary(options) {
   const { root, icon, storage, api, getMode, getBriefField, onBriefChanged, onLoadEntry, onCopy, notify, isBusy } = options;
-  const state = { entries: [], filter: "all", query: "", loaded: false, prefills: storageGet(storage), armedClear: false };
+  const state = { entries: [], filter: "all", query: "", loaded: false, prefills: storageGet(storage), editing: null, armedClear: false, gens: [], genPrompt: null };
   const prefillToggle = root.querySelector("[data-prefill-toggle]");
   const prefillMenu = root.querySelector("[data-prefill-menu]");
   const panel = root.querySelector("[data-history-panel]");
@@ -193,11 +221,29 @@ export function createPromptLibrary(options) {
 
   // ---- Prefills -------------------------------------------------------------
 
+  function prefillEditorMarkup(item, removable) {
+    const current = item.modes?.[0] || "";
+    const options = ["", ...ALL_MODES].map((value) => `<option value="${value}"${value === current ? " selected" : ""}>${value || "All modes"}</option>`).join("");
+    return `<form class="h3ps-prefill-edit" data-prefill-edit="${escapeHtml(item.id)}">
+      ${removable ? "" : "<small>Saving creates your own copy; the starter stays as it is.</small>"}
+      <input type="text" maxlength="80" value="${escapeHtml(item.name)}" aria-label="Prefill name" data-prefill-edit-name>
+      <textarea rows="7" aria-label="Prefill text" data-prefill-edit-text>${escapeHtml(item.text)}</textarea>
+      <div class="h3ps-prefill-edit-actions">
+        <select aria-label="Show in" data-prefill-edit-mode>${options}</select>
+        <button type="button" class="h3ps-history-btn is-quiet" data-prefill-edit-current title="Replace the text above with the current Creative Brief">Use current brief</button>
+        <span></span>
+        <button type="button" class="h3ps-history-btn is-quiet" data-prefill-edit-cancel>Cancel</button>
+        <button type="submit" class="h3ps-secondary-button">Save</button>
+      </div>
+    </form>`;
+  }
+
   function renderPrefillMenu() {
     const mode = getMode();
     const { user, builtIn } = prefillsForMode(mode, state.prefills);
-    const row = (item, removable) => `<div class="h3ps-prefill-row" role="none">
+    const row = (item, removable) => item.id === state.editing ? prefillEditorMarkup(item, removable) : `<div class="h3ps-prefill-row" role="none">
       <button type="button" role="menuitem" data-prefill-apply="${escapeHtml(item.id)}" title="${escapeHtml(item.text)}"><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.modes ? item.modes.join(" · ") : "All modes")}</small></button>
+      <button type="button" class="h3ps-prefill-remove" aria-label="Edit ${escapeHtml(item.name)}" title="${removable ? "Edit" : "Edit a copy"}" data-prefill-edit-open="${escapeHtml(item.id)}">${icon("edit", 11)}</button>
       ${removable ? `<button type="button" class="h3ps-prefill-remove" aria-label="Delete ${escapeHtml(item.name)}" data-prefill-remove="${escapeHtml(item.id)}">${icon("close", 11)}</button>` : ""}
     </div>`;
     prefillMenu.innerHTML = `
@@ -211,7 +257,35 @@ export function createPromptLibrary(options) {
       </form>`;
   }
 
+  function setPrefillEditing(id) {
+    state.editing = id;
+    renderPrefillMenu();
+    const form = id && prefillMenu.querySelector("[data-prefill-edit]");
+    if (form) {
+      form.scrollIntoView?.({ block: "nearest" });
+      form.querySelector("[data-prefill-edit-text]").focus();
+    }
+  }
+
+  function savePrefillEdit(form) {
+    const id = form.dataset.prefillEdit;
+    const text = form.querySelector("[data-prefill-edit-text]").value;
+    if (!text.trim()) { notify("Nothing to save", "A prefill needs some text."); return; }
+    const name = form.querySelector("[data-prefill-edit-name]").value.trim() || text.trim().split(/\s+/).slice(0, 6).join(" ");
+    const mode = form.querySelector("[data-prefill-edit-mode]").value;
+    const existing = state.prefills.find((item) => item.id === id);
+    if (existing) {
+      Object.assign(existing, { name: name.slice(0, 80), text, modes: mode ? [mode] : null });
+      savePrefills();
+    } else {
+      addPrefill(name, text, mode || null);
+    }
+    setPrefillEditing(null);
+    notify("Prefill saved", existing ? `“${name}” was updated.` : `“${name}” is now in My prefills.`);
+  }
+
   function setPrefillMenuOpen(open, restoreFocus = false) {
+    state.editing = null;
     if (open) renderPrefillMenu();
     prefillMenu.hidden = !open;
     prefillMenu.classList.remove("is-up");
@@ -252,6 +326,13 @@ export function createPromptLibrary(options) {
   prefillMenu.addEventListener("click", (event) => {
     const apply = event.target.closest("[data-prefill-apply]");
     if (apply) { applyPrefill(apply.dataset.prefillApply); return; }
+    const edit = event.target.closest("[data-prefill-edit-open]");
+    if (edit) { setPrefillEditing(edit.dataset.prefillEditOpen); return; }
+    if (event.target.closest("[data-prefill-edit-cancel]")) { setPrefillEditing(null); return; }
+    if (event.target.closest("[data-prefill-edit-current]")) {
+      prefillMenu.querySelector("[data-prefill-edit-text]").value = getBriefField().value;
+      return;
+    }
     const remove = event.target.closest("[data-prefill-remove]");
     if (remove) {
       state.prefills = state.prefills.filter((item) => item.id !== remove.dataset.prefillRemove);
@@ -261,6 +342,7 @@ export function createPromptLibrary(options) {
   });
   prefillMenu.addEventListener("submit", (event) => {
     event.preventDefault();
+    if (event.target.matches("[data-prefill-edit]")) { savePrefillEdit(event.target); return; }
     const text = getBriefField().value;
     if (!text.trim()) { notify("Nothing to save", "Write a Creative Brief first, then save it as a prefill."); return; }
     const modeOnly = prefillMenu.querySelector("[data-prefill-mode-only]").checked;
@@ -271,9 +353,22 @@ export function createPromptLibrary(options) {
 
   // ---- History --------------------------------------------------------------
 
+  function renderGens() {
+    const visible = filterGens(state.gens, { query: state.query, prompt: state.genPrompt });
+    root.querySelector("[data-history-count]").textContent = state.loaded
+      ? `${visible.length} of ${state.gens.length} render${state.gens.length === 1 ? "" : "s"}`
+      : "Loading…";
+    const scope = state.genPrompt === null ? "" : `<p class="h3ps-history-gen-scope">Renders of one prompt <button type="button" class="h3ps-text-button" data-gen-action="all">Show all gens</button></p>`;
+    list.innerHTML = scope + (visible.length
+      ? `<div class="h3ps-history-gen-grid">${visible.map((gen) => genMarkup(gen, icon)).join("")}</div>`
+      : `<p class="h3ps-history-empty">${state.loaded ? (state.gens.length ? "No renders match this search." : "Videos rendered with Send to Sogni will appear here.") : "Loading…"}</p>`);
+  }
+
   function renderHistory() {
-    const visible = filterHistory(state.entries, { mode: state.filter, query: state.query });
     root.querySelectorAll("[data-history-filter]").forEach((button) => button.classList.toggle("is-active", button.dataset.historyFilter === state.filter));
+    root.querySelector("[data-history-gen-total]").textContent = state.gens.length || "";
+    if (state.filter === "gens") { renderGens(); return; }
+    const visible = filterHistory(state.entries, { mode: state.filter, query: state.query });
     root.querySelector("[data-history-count]").textContent = state.loaded
       ? `${visible.length} of ${state.entries.length} prompt${state.entries.length === 1 ? "" : "s"}`
       : "Loading…";
@@ -286,6 +381,7 @@ export function createPromptLibrary(options) {
     try {
       const result = await api.listHistory();
       state.entries = result.entries || [];
+      state.gens = result.gens || [];
       state.loaded = true;
     } catch (error) {
       state.loaded = true;
@@ -300,6 +396,7 @@ export function createPromptLibrary(options) {
     disarmClear();
     if (open) {
       state.filter = "all";
+      state.genPrompt = null;
       renderHistory();
       refresh();
       requestAnimationFrame(() => root.querySelector("[data-history-search]")?.focus());
@@ -333,10 +430,11 @@ export function createPromptLibrary(options) {
     const button = event.target.closest("[data-history-filter]");
     if (!button) return;
     state.filter = button.dataset.historyFilter;
+    state.genPrompt = null;
     renderHistory();
   });
   root.querySelector("[data-history-clear]").addEventListener("click", async (event) => {
-    if (!state.entries.length) return;
+    if (!state.entries.length && !state.gens.length) return;
     if (!state.armedClear) {
       state.armedClear = true;
       event.currentTarget.textContent = `Delete all ${state.entries.length}?`;
@@ -347,19 +445,32 @@ export function createPromptLibrary(options) {
     try {
       await api.clearHistory();
       state.entries = [];
+      state.gens = [];
       renderHistory();
-      notify("History cleared", "All saved prompts and their pictures were deleted.");
+      notify("History cleared", "Saved prompts, their pictures and the list of gens were deleted. Rendered videos stay in output/h3_sogni.");
     } catch (error) {
       notify(error.code || "Clear failed", error.message);
     }
   });
   list.addEventListener("click", async (event) => {
+    const genButton = event.target.closest("[data-gen-action]");
+    if (genButton) {
+      if (genButton.dataset.genAction === "all") { state.genPrompt = null; renderHistory(); return; }
+      const gen = state.gens.find((item) => item.id === genButton.closest("[data-history-gen]")?.dataset.historyGen);
+      if (gen) onCopy(gen.prompt);
+      return;
+    }
     const button = event.target.closest("[data-history-action]");
     if (!button) return;
     const entry = state.entries.find((item) => item.id === button.closest("[data-history-entry]")?.dataset.historyEntry);
     if (!entry) return;
     const action = button.dataset.historyAction;
     if (action === "copy") onCopy(entry.prompt);
+    else if (action === "gens") {
+      state.filter = "gens";
+      state.genPrompt = entry.prompt;
+      renderHistory();
+    }
     else if (action === "prefill") {
       if (!entry.brief.trim()) { notify("Nothing to save", "This entry has an empty Creative Brief."); return; }
       addPrefill(`${entry.mode} · ${entry.brief.trim().split(/\s+/).slice(0, 5).join(" ")}`, entry.brief, null);
@@ -384,9 +495,10 @@ export function createPromptLibrary(options) {
     }
   });
 
+  // Capture phase: the menu's own click handler re-renders it, which would detach the clicked button.
   root.addEventListener("click", (event) => {
     if (!prefillMenu.hidden && !event.target.closest("[data-prefill-picker]")) setPrefillMenuOpen(false);
-  });
+  }, true);
 
   return {
     record,
@@ -394,6 +506,7 @@ export function createPromptLibrary(options) {
     get historyOpen() { return !panel.hidden; },
     /** Close the topmost library surface. Returns true when something was closed. */
     closeTopmost() {
+      if (state.editing) { setPrefillEditing(null); return true; }
       if (!prefillMenu.hidden) { setPrefillMenuOpen(false, true); return true; }
       if (!panel.hidden) { setHistoryOpen(false); return true; }
       return false;

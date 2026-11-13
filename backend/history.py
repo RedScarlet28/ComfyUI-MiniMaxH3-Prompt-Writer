@@ -5,19 +5,22 @@ Each generated prompt is stored as one folder under the ComfyUI user directory:
     <user>/h3_prompt_writer/history/<entry id>/entry.json
     <user>/h3_prompt_writer/history/<entry id>/thumb_<n>.jpg
     <user>/h3_prompt_writer/history/<entry id>/media_<n>.<ext>   (pictures only)
+    <user>/h3_prompt_writer/history/gens.json                    (finished Sogni renders)
 
-Writer's session media lives in ComfyUI's temp directory, which is wiped on every
-restart, so history keeps its own copies of the pictures and video posters.
+History keeps its own copies of the pictures and video posters, so an entry stays
+complete after its tab's media is removed.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import threading
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 from uuid import UUID, uuid4
 
 import folder_paths
@@ -26,6 +29,8 @@ from PIL import Image, ImageOps
 
 VIDEO_MODES = {"T2VA", "I2VA", "FL2VA", "L2VA", "Reference"}
 MAX_ENTRIES = 150
+MAX_GENS = 500
+GENS_NAME = "gens.json"
 MAX_TEXT_CHARS = 40_000
 THUMB_SIZE = 320
 _LOCK = threading.RLock()
@@ -174,7 +179,43 @@ def clear_entries(*, root: Path | None = None) -> int:
         for entry in list_entries(root=root):
             shutil.rmtree(root / entry["id"], ignore_errors=True)
             removed += 1
+        (root / GENS_NAME).unlink(missing_ok=True)
     return removed
+
+
+def list_gens(*, root: Path | None = None) -> list[dict[str, Any]]:
+    try:
+        gens = json.loads(((root or HISTORY_ROOT) / GENS_NAME).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return gens if isinstance(gens, list) else []
+
+
+def record_gens(jobs: list[dict[str, Any]], *, root: Path | None = None) -> None:
+    """Log finished Sogni renders by job id, so History keeps them after the queue is cleared."""
+    root = root or HISTORY_ROOT
+    with _LOCK:
+        gens = list_gens(root=root)
+        known = {gen.get("id") for gen in gens}
+        added = [{
+            "id": job["id"],
+            "created_at": job.get("finished_at") or time.time(),
+            "prompt": _text(job.get("prompt")).strip(),
+            "loras": len(job.get("loras") or []),
+            **{key: job.get(key) for key in ("title", "mode", "network", "resolution", "duration", "width", "height", "saved_name")},
+        } for job in jobs if job.get("saved_name") and job["id"] not in known]
+        if not added:
+            return
+        gens = sorted(gens + added, key=lambda gen: gen.get("created_at", 0), reverse=True)[:MAX_GENS]
+        root.mkdir(parents=True, exist_ok=True)
+        tmp = root / f"{GENS_NAME}.tmp"
+        tmp.write_text(json.dumps(gens, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, root / GENS_NAME)
+
+
+def public_gen(gen: dict[str, Any]) -> dict[str, Any]:
+    subfolder, _, filename = str(gen.get("saved_name") or "").rpartition("/")
+    return {**gen, "video_url": "/view?" + urlencode({"filename": filename, "subfolder": subfolder, "type": "output"})}
 
 
 def entry_file(entry_id: str, kind: str, index: int, *, root: Path | None = None) -> Path:

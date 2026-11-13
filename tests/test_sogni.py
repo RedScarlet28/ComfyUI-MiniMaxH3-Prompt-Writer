@@ -5,6 +5,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from PIL import Image
+
 from backend import sogni, sogni_models as models
 from backend.sogni_queue import SENSITIVE_HINT, Dispatcher, GatewayError, JobStore, lora_rows
 
@@ -248,10 +250,12 @@ class QueueTests(unittest.TestCase):
     def test_completed_result_downloads(self):
         record = self.add()
         self.run_tick()
+        self.dispatcher.on_saved = mock.Mock()
         self.gateway.results["proj1"] = {"status": "completed", "finished": True, "jobs": [{"url": "https://cdn/v.mp4"}]}
         asyncio.run(self.dispatcher.apply_result(record["id"], self.gateway.results["proj1"]))
         job = self.store.get(record["id"])
         self.assertEqual(job["status"], "completed")
+        self.dispatcher.on_saved.assert_called_once_with(job)
         self.assertEqual(job["saved_name"], f"h3_sogni/{record['id']}.mp4")
         self.assertEqual(self.saved, ["https://cdn/v.mp4"])
 
@@ -269,6 +273,20 @@ class QueueTests(unittest.TestCase):
         self.run_tick()
         self.assertEqual(self.store.get(record["id"])["message"], SENSITIVE_HINT)
 
+    def test_worker_failure_is_resubmitted_once(self):
+        record = self.add()
+        failure = GatewayError(5000, "A worker couldn't complete this generation. Please try again.")
+        self.gateway.errors = [failure]
+        self.run_tick()
+        job = self.store.get(record["id"])
+        self.assertEqual((job["status"], job["worker_retried"]), ("pending", True))
+        self.gateway.errors = [failure]
+        self.run_tick()
+        job = self.store.get(record["id"])
+        self.assertEqual(job["status"], "failed")
+        self.assertIn("(5000)", job["message"])
+        self.assertFalse(self.dispatcher.retry(record["id"])["worker_retried"])
+
     def test_media_is_copied_and_kept_for_retry(self):
         source = self.root / "pic.png"
         source.write_bytes(b"png")
@@ -281,6 +299,16 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(self.dispatcher.retry(record["id"])["status"], "pending")
         self.store.update(record["id"], status="completed")
         self.assertFalse(copied.exists())
+
+    def test_reference_video_over_15s_is_trimmed(self):
+        source = self.root / "clip.mov"
+        source.write_bytes(b"mov")
+        with mock.patch("backend.sogni_queue.render_video") as render:
+            record = self.add(media=[{"type": "video", "path": str(source), "width": 640, "height": 360, "duration": 15.04}])
+        target, edit = Path(render.call_args[0][1]), render.call_args[0][2]
+        self.assertEqual(record["media"][0]["path"], str(target))
+        self.assertEqual(target.suffix, ".mp4")
+        self.assertEqual(edit, {"crop": {"x": 0, "y": 0, "w": 640, "h": 360}, "start": 0, "end": 14.9})
 
     def test_restart_recovers_submitting_jobs(self):
         record = self.add()
@@ -307,6 +335,31 @@ class QueueTests(unittest.TestCase):
         self.assertFalse(self.store.remove(record["id"]))
         self.store.update(record["id"], status="failed")
         self.assertTrue(self.store.remove(record["id"]))
+
+    def test_waiting_jobs_can_be_moved_and_are_sent_in_the_new_order(self):
+        self.settings["fast_slots"] = 1
+        first, second, third = self.add(), self.add(), self.add()
+        self.assertTrue(self.store.move(third["id"], first["id"]))
+        self.assertTrue(self.store.move(first["id"], None))
+        self.assertEqual([job["id"] for job in self.store.snapshot()], [third["id"], second["id"], first["id"]])
+        self.assertFalse(self.store.move(first["id"], "missing"))
+        self.run_tick()
+        self.assertEqual(self.store.get(third["id"])["status"], "active")
+        self.assertFalse(self.store.move(third["id"], None))
+        self.assertEqual([job["id"] for job in JobStore(self.root / "queue").snapshot()], [third["id"], second["id"], first["id"]])
+
+    def test_thumbnail_is_made_from_the_first_picture_and_removed_with_the_job(self):
+        source = self.root / "pic.png"
+        Image.new("RGB", (800, 400), "teal").save(source)
+        record = self.add(media=[{"type": "image", "path": str(source), "width": 800, "height": 400}])
+        thumb = self.store.thumb_path(record["id"])
+        with Image.open(thumb) as image:
+            self.assertEqual(image.size, (160, 80))
+        self.store.update(record["id"], status="completed")
+        self.assertEqual(self.store.thumbnail(record["id"]), thumb)
+        self.store.remove(record["id"])
+        self.assertFalse(thumb.exists())
+        self.assertIsNone(self.store.thumbnail(self.add()["id"]))
 
 
 if __name__ == "__main__":

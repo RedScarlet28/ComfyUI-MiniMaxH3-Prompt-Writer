@@ -104,17 +104,28 @@ function lorasMarkup(catalog, stack, max, filter) {
     <div class="h3ps-sogni-queue-tools"><button type="button" class="h3ps-text-button" data-lora-reload>Refresh list</button>${stack.length ? '<button type="button" class="h3ps-text-button" data-lora-clear>Turn all off</button>' : ""}</div>`;
 }
 
-function jobRow(job) {
+// Waiting jobs of one network are sent oldest first, so their order in state.jobs is the line.
+function lineOf(jobs, job) {
+  return jobs.filter((item) => item.status === "pending" && item.network === job.network);
+}
+
+function jobRow(job, jobs) {
   const actions = [];
+  const line = job.status === "pending" ? lineOf(jobs, job) : [];
+  const place = line.indexOf(job);
   if (job.status === "completed" && (job.saved_name || job.video_url)) actions.push(`<button type="button" data-job-action="open">Open</button>`);
   if (job.status === "pending") actions.push(`<button type="button" data-job-action="network" data-network="${job.network === "fast" ? "relaxed" : "fast"}">→ ${job.network === "fast" ? "Relaxed" : "Fast"}</button>`);
   if (UNFINISHED.has(job.status)) actions.push(`<button type="button" data-job-action="cancel">Cancel</button>`);
   if (job.status === "failed" || job.status === "cancelled") actions.push(`<button type="button" data-job-action="retry">Retry</button>`);
   if (!UNFINISHED.has(job.status)) actions.push(`<button type="button" data-job-action="remove" title="Remove from list">✕</button>`);
   const note = job.message || job.waiting || "";
-  return `<li class="h3ps-sogni-job is-${esc(job.status)}" data-job-id="${esc(job.id)}">
+  const meta = place >= 0 ? `#${place + 1} in ${NETWORK_LABEL[job.network]} line · ${jobMeta(job)}` : jobMeta(job);
+  const thumb = api.apiURL(`${PREFIX}/jobs/${encodeURIComponent(job.id)}/thumb?v=${job.status === "completed" ? 1 : 0}`);
+  const drag = job.status === "pending" ? ' draggable="true" title="Drag to change when this renders"' : "";
+  return `<li class="h3ps-sogni-job is-${esc(job.status)}" data-job-id="${esc(job.id)}"${drag}>
+    <img class="h3ps-sogni-thumb" src="${esc(thumb)}" alt="" loading="lazy" draggable="false">
     <div><span class="h3ps-sogni-chip">${esc(STATUS_LABEL[job.status] || job.status)}</span><strong title="${esc(job.title)}">${esc(job.title)}</strong></div>
-    <small>${esc(jobMeta(job))}</small>
+    <small>${esc(meta)}</small>
     ${note ? `<small class="h3ps-sogni-job-note">${esc(note)}</small>` : ""}
     <div class="h3ps-sogni-job-actions">${actions.join("")}</div>
   </li>`;
@@ -136,7 +147,7 @@ function queueMarkup(state) {
       <button type="button" class="h3ps-text-button" data-sogni-clear ${counts.completed || counts.failed || counts.cancelled ? "" : "disabled"}>Clear finished</button>
     </div>
     ${problem}${blocked}
-    ${jobs.length ? `<ul class="h3ps-sogni-jobs">${jobs.map(jobRow).join("")}</ul>` : '<p class="h3ps-sogni-empty">Nothing queued. Press Send to Sogni, or Send all tabs.</p>'}`;
+    ${jobs.length ? `<ul class="h3ps-sogni-jobs">${jobs.map((job) => jobRow(job, state.jobs)).join("")}</ul>` : '<p class="h3ps-sogni-empty">Nothing queued. Press Send to Sogni, or Send all tabs.</p>'}`;
 }
 
 export function bindSogni({ root, getContext, collectTabs, showToast }) {
@@ -159,6 +170,7 @@ export function bindSogni({ root, getContext, collectTabs, showToast }) {
   let state = { jobs: [], networks: {}, sdk_installed: true };
   let known = new Map();
   let pollTimer = null;
+  let dragId = null;
   let firstLoad = true;
 
   async function loadSettings() {
@@ -204,7 +216,7 @@ export function bindSogni({ root, getContext, collectTabs, showToast }) {
     const unfinished = state.jobs.filter((job) => UNFINISHED.has(job.status)).length;
     countBadge.hidden = !unfinished;
     countBadge.textContent = unfinished;
-    if (!queuePanel.hidden) queuePanel.innerHTML = queueMarkup(state);
+    if (!queuePanel.hidden && !dragId) queuePanel.innerHTML = queueMarkup(state);
     schedule(unfinished || !queuePanel.hidden ? POLL_ACTIVE_MS : POLL_IDLE_MS);
   }
 
@@ -371,6 +383,18 @@ export function bindSogni({ root, getContext, collectTabs, showToast }) {
     }
   }
 
+  // The list shows newest first, so a card dropped above another is sent after it.
+  function dropTarget(event) {
+    const card = event.target.closest?.(".h3ps-sogni-job.is-pending");
+    if (!card || !dragId || card.dataset.jobId === dragId) return null;
+    const box = card.getBoundingClientRect();
+    return { card, above: event.clientY < box.top + box.height / 2 };
+  }
+
+  function clearDropMarks() {
+    queuePanel.querySelectorAll(".is-drop-above, .is-drop-below").forEach((card) => card.classList.remove("is-drop-above", "is-drop-below"));
+  }
+
   sendButton.addEventListener("click", send);
   networkButtons.forEach((button) => button.addEventListener("click", async () => {
     if (!settings) await loadSettings().catch(() => null);
@@ -427,6 +451,39 @@ export function bindSogni({ root, getContext, collectTabs, showToast }) {
     const id = button.closest("[data-job-id]").dataset.jobId;
     jobAction(id, button.dataset.jobAction, button.dataset.network ? { network: button.dataset.network } : {});
   });
+  queuePanel.addEventListener("dragstart", (event) => {
+    const card = event.target.closest?.(".h3ps-sogni-job.is-pending");
+    if (!card) return;
+    dragId = card.dataset.jobId;
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", dragId);
+    card.classList.add("is-dragging");
+  });
+  queuePanel.addEventListener("dragover", (event) => {
+    const target = dropTarget(event);
+    clearDropMarks();
+    if (!target) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    target.card.classList.add(target.above ? "is-drop-above" : "is-drop-below");
+  });
+  queuePanel.addEventListener("drop", (event) => {
+    const target = dropTarget(event);
+    if (!target) return;
+    event.preventDefault();
+    const over = state.jobs.find((job) => job.id === target.card.dataset.jobId);
+    const before = target.above ? state.jobs[state.jobs.indexOf(over) + 1] : over;
+    const moved = dragId;
+    dragId = null;
+    if (before?.id !== moved) jobAction(moved, "move", { before: before?.id ?? null });
+  });
+  queuePanel.addEventListener("dragend", () => {
+    dragId = null;
+    if (!queuePanel.hidden) queuePanel.innerHTML = queueMarkup(state);
+  });
+  queuePanel.addEventListener("error", (event) => {
+    if (event.target.matches?.(".h3ps-sogni-thumb")) event.target.hidden = true;
+  }, true);
   for (const [panel] of panels) {
     panel.addEventListener("keydown", (event) => {
       if (event.key !== "Escape") return;

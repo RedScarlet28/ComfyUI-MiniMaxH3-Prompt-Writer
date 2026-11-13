@@ -335,7 +335,9 @@ export function restoredModelAfterDiscovery(state) {
       : state.preferredProvider === "ollama"
         ? state.models.find((model) => model.family === "ollama" && model.remote_model === state.ollamaModelName && model.runtime_ready)
           || state.models.find((model) => model.family === "ollama" && model.runtime_ready)
-        : null;
+        : state.preferredProvider === "api"
+          ? state.models.find((model) => model.family === "api" && model.remote_model === state.apiProviderConfig?.model_id)
+          : null;
   return preferredProviderModel
     || preferredDirect
     || state.models.find((model) => model.runtime_ready)

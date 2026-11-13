@@ -31,7 +31,7 @@ function fixture({ entries = [], storage = memoryStorage(), mode = "T2VA" } = {}
   const root = document.querySelector("#root");
   const calls = { notify: [], loaded: [], copied: [], deleted: [], changed: 0 };
   const api = {
-    listHistory: async () => ({ entries }),
+    listHistory: async () => ({ entries, gens: window.__gens || [] }),
     addHistory: async (payload) => ({ entry: { id: "new", created_at: 1, assets: [], ...payload } }),
     deleteHistory: async (id) => { calls.deleted.push(id); return { deleted: id }; },
     clearHistory: async () => ({ removed: entries.length }),
@@ -105,6 +105,41 @@ test("saving the current brief creates a removable user prefill", () => {
   assert.deepEqual(saved[0].modes, ["I2VA"]);
   root.querySelector(`[data-prefill-remove="${saved[0].id}"]`).click();
   assert.equal(JSON.parse(storage.data.get("h3ps.briefPrefills.v1")).length, 0);
+  assert.equal(root.querySelector("[data-prefill-menu]").hidden, false);
+});
+
+test("saved prefills are edited in place and starters are edited as copies", () => {
+  const storage = memoryStorage({ "h3ps.briefPrefills.v1": JSON.stringify([{ id: "u1", name: "Mine", text: "old text", modes: ["T2VA"] }]) });
+  const { root, library, calls } = fixture({ storage });
+  const menu = root.querySelector("[data-prefill-menu]");
+  const submit = (form) => form.dispatchEvent(new root.ownerDocument.defaultView.Event("submit", { bubbles: true, cancelable: true }));
+  root.querySelector("[data-prefill-toggle]").click();
+  root.querySelector('[data-prefill-edit-open="u1"]').click();
+  assert.equal(menu.hidden, false);
+  const form = menu.querySelector('[data-prefill-edit="u1"]');
+  assert.equal(form.querySelector("[data-prefill-edit-text]").value, "old text");
+  form.querySelector("[data-prefill-edit-current]").click();
+  assert.equal(form.querySelector("[data-prefill-edit-text]").value, "old brief");
+  form.querySelector("[data-prefill-edit-name]").value = "Renamed";
+  form.querySelector("[data-prefill-edit-mode]").value = "";
+  submit(form);
+  assert.deepEqual(JSON.parse(storage.data.get("h3ps.briefPrefills.v1")), [{ id: "u1", name: "Renamed", text: "old brief", modes: null }]);
+  assert.equal(menu.querySelector("[data-prefill-edit]"), null);
+  assert.equal(root.querySelector("[data-video-brief]").value, "old brief");
+
+  root.querySelector('[data-prefill-edit-open="builtin-cinematic"]').click();
+  const copy = menu.querySelector('[data-prefill-edit="builtin-cinematic"]');
+  copy.querySelector("[data-prefill-edit-text]").value = "my take";
+  submit(copy);
+  const saved = JSON.parse(storage.data.get("h3ps.briefPrefills.v1"));
+  assert.deepEqual([saved.length, saved[0].name, saved[0].text], [2, "Cinematic scene", "my take"]);
+  assert.equal(BUILT_IN_PREFILLS.find((item) => item.id === "builtin-cinematic").text.startsWith("A cinematic"), true);
+
+  root.querySelector('[data-prefill-edit-open="u1"]').click();
+  assert.equal(library.closeTopmost(), true);
+  assert.equal(menu.querySelector("[data-prefill-edit]"), null);
+  assert.equal(menu.hidden, false);
+  assert.equal(calls.notify.at(-1).title, "Prefill saved");
 });
 
 test("history panel lists entries with thumbnails and routes actions", async () => {
@@ -129,6 +164,28 @@ test("history panel lists entries with thumbnails and routes actions", async () 
   await flush();
   assert.deepEqual(calls.loaded, [["e1", true]]);
   assert.equal(library.historyOpen, false);
+});
+
+test("history shows gens for one prompt or all of them", async () => {
+  const entries = [{ id: "e1", created_at: 1, mode: "I2VA", brief: "b", prompt: "Prompt A", assets: [], gen_count: 1 }];
+  const gens = [
+    { id: "g1", created_at: 2, prompt: "Prompt A", title: "First", mode: "I2VA", network: "fast", video_url: "/view?filename=g1.mp4" },
+    { id: "g2", created_at: 3, prompt: "Prompt B", title: "Second", mode: "Reference", network: "relaxed", loras: 1, video_url: "/view?filename=g2.mp4" },
+  ];
+  const { root, calls } = fixture({ entries });
+  root.ownerDocument.defaultView.__gens = gens;
+  root.querySelector("[data-history-open]").click();
+  await flush();
+  assert.equal(root.querySelector("[data-history-gen-total]").textContent, "2");
+  root.querySelector('[data-history-action="gens"]').click();
+  const list = root.querySelector("[data-history-list]");
+  assert.deepEqual([...list.querySelectorAll("[data-history-gen]")].map((card) => card.dataset.historyGen), ["g1"]);
+  assert.equal(list.querySelector("video").getAttribute("src"), "/view?filename=g1.mp4");
+  list.querySelector('[data-gen-action="copy"]').click();
+  assert.deepEqual(calls.copied, ["Prompt A"]);
+  list.querySelector('[data-gen-action="all"]').click();
+  assert.equal(list.querySelectorAll("[data-history-gen]").length, 2);
+  assert.match(list.textContent, /Relaxed · 1 LoRA/);
 });
 
 test("closeTopmost closes the prefill menu before the history panel", async () => {

@@ -715,12 +715,13 @@ class RouteStabilityTests(unittest.IsolatedAsyncioTestCase):
             (stale_dir / "asset.bin").write_bytes(b"old")
             with (
                 patch.object(routes, "SESSION_TTL_SECONDS", 60.0),
+                patch.object(routes, "MEDIA_TTL_SECONDS", 90.0),
                 patch.object(routes.STORE, "expire_sessions", return_value=[stale_dir]) as expire_sessions,
             ):
                 await routes._cleanup_expired_state(now=100.0)
             self.assertFalse(stale_dir.exists())
 
-        expire_sessions.assert_called_once_with(now=100.0, max_age_seconds=60.0)
+        expire_sessions.assert_called_once_with(now=100.0, max_age_seconds=90.0)
         self.assertNotIn(stale_key, routes.GENERATION_CACHE)
         self.assertIn(fresh_key, routes.GENERATION_CACHE)
         self.assertFalse(routes.STATE["media_mutation_active"])
@@ -1169,6 +1170,34 @@ class RouteStabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.payload(response), {"assets": assets})
         self.assertNotIn(reference_key, routes.GENERATION_CACHE)
         self.assertIn(text_key, routes.GENERATION_CACHE)
+
+    async def test_api_key_is_saved_reused_and_forgotten(self):
+        connection = {"id": "c1", "preset": "nanogpt", "base_url": "https://api.nano-gpt.com/api/v1"}
+        with tempfile.TemporaryDirectory() as directory:
+            keys = Path(directory) / "api_keys.json"
+            seen = []
+
+            def probe(body):
+                seen.append(body["credential"]["value"])
+                return {"connection": connection, "models": [], "model": None}
+
+            with (
+                patch("backend.api_keys.KEYS_PATH", keys),
+                patch.object(routes.API_PROVIDER_BACKEND, "probe", side_effect=probe),
+                patch.object(routes.API_PROVIDER_BACKEND, "list_models", return_value={"connection": connection}),
+                patch.object(routes.API_PROVIDER_BACKEND, "disconnect", return_value=True),
+            ):
+                typed = {"preset": "nanogpt", "credential": {"source": "session", "value": "sk-nano-1234"}}
+                blank = {"preset": "nanogpt", "credential": {"source": "session", "value": ""}}
+                await routes.probe_api_provider(_Request(body=typed))
+                await routes.probe_api_provider(_Request(body=blank))
+                await routes.disconnect_api_provider(_Request(body={"connection_id": "c1"}))
+                await routes.probe_api_provider(_Request(body=blank))
+                await routes.disconnect_api_provider(_Request(body={"connection_id": "c1", "forget_key": True}))
+                await routes.probe_api_provider(_Request(body=blank))
+
+            self.assertEqual(seen, ["sk-nano-1234", "sk-nano-1234", "sk-nano-1234", ""])
+            self.assertEqual(json.loads(keys.read_text(encoding="utf-8")), {})
 
 
 if __name__ == "__main__":

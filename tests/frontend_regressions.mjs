@@ -21,6 +21,7 @@ import "./workflow_media.mjs";
 import "./floating_media.mjs";
 import "./prompt_library.mjs";
 import "./prompt_tabs.mjs";
+import "./dictation.mjs";
 
 const source = await readFile(new URL("../web/compat.js", import.meta.url), "utf8");
 const encoded = Buffer.from(source).toString("base64");
@@ -1310,7 +1311,7 @@ test("Settings separates providers, installed models, diagnostics, and verified 
   }
   assert.doesNotMatch(mainSource, /h3ps-provider-icon">[SO]<\/span>/);
   assert.match(mainSource, /data-api-provider-form/);
-  assert.match(mainSource, /The key is sent once to the local H3 backend/);
+  assert.match(mainSource, /It never goes to browser storage\. Disconnect deletes it\./);
   assert.match(mainSource, /Reasoning provider managed/);
   assert.match(mainSource, /label\.hidden = apiManaged/);
   assert.doesNotMatch(mainSource, /credential_source|environment_name|Not analyzed locally|Exclude from AI analysis|data-analysis-asset/);

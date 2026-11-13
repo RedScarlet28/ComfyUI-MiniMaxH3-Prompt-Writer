@@ -18,12 +18,23 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable
 
-from . import sogni
+import av
+from PIL import Image, ImageOps
+
+from . import history, sogni
+from .media import IMAGE_EXTENSIONS, MediaError
+from .media_editor import render_video
 from .sogni_models import NETWORKS, all_model_ids, project_params
 
 QUEUE_FULL = 4079
+THUMB_SIZE = 160
+REFERENCE_VIDEO_MAX_S = 15.0
+# A little under the limit, since AAC padding can make the container run a few ms long.
+REFERENCE_VIDEO_TRIM_S = 14.9
 RENEWAL_RETRY = 4080
 FAST_CAPACITY = {4087, 4089}
+# Generic worker failure, worker disconnected, job timed out: Sogni gives no reason, so resubmit once.
+WORKER_FAILURES = {5000, 5002, 5003}
 ADMISSION_WAIT_S = 20
 LIVE_WAIT_S = 60
 RECOVERED_POLL_S = 30
@@ -90,8 +101,17 @@ class JobStore:
             for index, item in enumerate(media):
                 source = Path(item["path"])
                 target = directory / f"{index:02d}_{item['type']}{source.suffix.lower()}"
-                shutil.copy2(source, target)
+                if item["type"] == "video" and (item.get("duration") or 0) > REFERENCE_VIDEO_MAX_S:
+                    # Writer accepts up to 15.1 s; Sogni rejects anything over 15 s.
+                    target = target.with_suffix(".mp4")
+                    crop = {"x": 0, "y": 0, "w": item["width"], "h": item["height"]}
+                    render_video(source, target, {"crop": crop, "start": 0, "end": REFERENCE_VIDEO_TRIM_S})
+                else:
+                    shutil.copy2(source, target)
                 copied.append({**item, "path": str(target)})
+        except MediaError as error:
+            shutil.rmtree(directory, ignore_errors=True)
+            raise sogni.SogniError("MEDIA_COPY_FAILED", f"Could not trim the reference video for Sogni: {error.message}") from None
         except OSError as error:
             shutil.rmtree(directory, ignore_errors=True)
             raise sogni.SogniError("MEDIA_COPY_FAILED", f"Could not copy reference media: {error}") from None
@@ -102,6 +122,7 @@ class JobStore:
         with self.lock:
             self.jobs.append(record)
             self.save()
+        self.thumbnail(job_id)
         return record
 
     def get(self, job_id: str) -> dict[str, Any] | None:
@@ -122,6 +143,44 @@ class JobStore:
             self.save()
             return job
 
+    def move(self, job_id: str, before_id: str | None) -> bool:
+        """Place a waiting job ahead of ``before_id`` (or last); waiting jobs are sent in list order."""
+        with self.lock:
+            job = self.get(job_id)
+            before = self.get(before_id) if before_id else None
+            if job is None or job["status"] != "pending" or job is before or (before_id and before is None):
+                return False
+            self.jobs.remove(job)
+            self.jobs.insert(self.jobs.index(before) if before else len(self.jobs), job)
+            self.save()
+            return True
+
+    def thumb_path(self, job_id: str) -> Path:
+        return self.root / "thumbs" / f"{job_id}.jpg"
+
+    def thumbnail(self, job_id: str, fallback: Path | None = None) -> Path | None:
+        """A small JPEG of the job's first picture or video (or ``fallback``), made once and kept."""
+        target = self.thumb_path(job_id)
+        if target.is_file():
+            return target
+        job = self.get(job_id) or {}
+        sources = [Path(item["path"]) for item in job.get("media") or [] if item["type"] in {"image", "video"}]
+        for source in [*sources, *([fallback] if fallback else [])]:
+            try:
+                if source.suffix.lower() in IMAGE_EXTENSIONS:
+                    with Image.open(source) as opened:
+                        image = ImageOps.exif_transpose(opened).convert("RGB")
+                else:
+                    with av.open(str(source)) as container:
+                        image = next(container.decode(video=0)).to_image()
+            except (OSError, av.error.FFmpegError, StopIteration):
+                continue
+            image.thumbnail((THUMB_SIZE, THUMB_SIZE))
+            target.parent.mkdir(parents=True, exist_ok=True)
+            image.save(target, "JPEG", quality=80)
+            return target
+        return None
+
     def remove(self, job_id: str) -> bool:
         with self.lock:
             job = self.get(job_id)
@@ -129,6 +188,7 @@ class JobStore:
                 return False
             self.jobs.remove(job)
             shutil.rmtree(self.job_dir(job_id), ignore_errors=True)
+            self.thumb_path(job_id).unlink(missing_ok=True)
             self.save()
             return True
 
@@ -138,6 +198,7 @@ class JobStore:
             for job in finished:
                 self.jobs.remove(job)
                 shutil.rmtree(self.job_dir(job["id"]), ignore_errors=True)
+                self.thumb_path(job["id"]).unlink(missing_ok=True)
             self.save()
             return len(finished)
 
@@ -243,12 +304,14 @@ class Dispatcher:
                  settings: Callable[[], dict[str, Any]] = sogni.current,
                  downloader: Callable[[str, Path], None] = sogni.download,
                  output_root: Callable[[], Path] = sogni.output_root,
+                 on_saved: Callable[[dict[str, Any]], None] = lambda job: None,
                  clock: Callable[[], float] = time.time):
         self.store = store
         self.gateway_factory = gateway_factory or self._sdk_gateway
         self.settings = settings
         self.downloader = downloader
         self.output_root = output_root
+        self.on_saved = on_saved
         self.clock = clock
         self.gateway = None
         self.state = "idle"
@@ -405,6 +468,9 @@ class Dispatcher:
             for name in NETWORKS:
                 self._block(name, 900, "Sogni is retrying your plan renewal; Unlimited renders are paused.")
             self.store.update(job_id, status="pending", project_id=None, waiting="Plan renewal pending")
+        elif code in WORKER_FAILURES and not job.get("worker_retried") and failure_text(error.message) != SENSITIVE_HINT:
+            self.store.update(job_id, status="pending", project_id=None, worker_retried=True,
+                              waiting="A Sogni worker failed; sent again automatically")
         elif error.transient and job.get("attempts", 0) < MAX_SUBMIT_ATTEMPTS:
             delay = error.retry_after or 15 * job.get("attempts", 1)
             self.store.update(job_id, status="pending", project_id=None, not_before=self.clock() + delay,
@@ -427,13 +493,9 @@ class Dispatcher:
                         return
                     result = await self.gateway.result(project_id)
                 except GatewayError as error:
-                    if _int_code(error.code) in {QUEUE_FULL, RENEWAL_RETRY, *FAST_CAPACITY}:
-                        self._handle_error(job_id, job["network"], error, self.settings(), submitted=False)
-                        self.poke()
-                        return
-                    if error.transient:
+                    if error.transient and _int_code(error.code) not in {QUEUE_FULL, RENEWAL_RETRY, *FAST_CAPACITY}:
                         continue
-                    self.store.update(job_id, status="failed", message=failure_text(error.message, error.code))
+                    self._handle_error(job_id, job["network"], error, self.settings(), submitted=False)
                     self.poke()
                     return
                 if await self.apply_result(job_id, result):
@@ -472,8 +534,10 @@ class Dispatcher:
             self.store.update(job_id, status="completed", video_url=url, waiting="",
                               message=f"Rendered, but saving failed: {error}. The link works for 24 hours.")
         else:
-            self.store.update(job_id, status="completed", video_url=url, waiting="", message="",
-                              saved_name=f"h3_sogni/{target.name}")
+            job = self.store.update(job_id, status="completed", video_url=url, waiting="", message="",
+                                    saved_name=f"h3_sogni/{target.name}")
+            if job:
+                await asyncio.to_thread(self.on_saved, job)
         self.poke()
 
     async def cancel(self, job_id: str) -> dict[str, Any] | None:
@@ -501,7 +565,7 @@ class Dispatcher:
             self.store.update(job_id, message="Its reference media was cleaned up; send it again from Writer.")
             return job
         updated = self.store.update(job_id, status="pending", project_id=None, message="", waiting="",
-                                    finished_at=None, attempts=0, not_before=0)
+                                    finished_at=None, attempts=0, not_before=0, worker_retried=False)
         self.poke()
         return updated
 
@@ -581,4 +645,6 @@ def _int_code(code: Any) -> int | None:
 
 
 STORE = JobStore(sogni.user_root() / "sogni_queue")
-DISPATCHER = Dispatcher(STORE)
+DISPATCHER = Dispatcher(STORE, on_saved=lambda job: history.record_gens([job]))
+# Renders that finished before the History log existed.
+history.record_gens([job for job in STORE.snapshot() if job["status"] == "completed"])

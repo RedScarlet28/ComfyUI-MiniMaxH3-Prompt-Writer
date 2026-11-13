@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import Counter
 import hashlib
 import mimetypes
 import shutil
@@ -28,13 +29,15 @@ from .memory import assess_free_vram
 from .models.gguf_backend import BACKEND as GGUF_BACKEND
 from .models.external_server_backend import BACKEND as EXTERNAL_SERVER_BACKEND
 from .models.ollama_backend import BACKEND as OLLAMA_BACKEND, normalize_ollama_url
-from .models.api_provider_backend import BACKEND as API_PROVIDER_BACKEND
+from .models.api_provider_backend import BACKEND as API_PROVIDER_BACKEND, normalize_api_base_url
 from .models.contract import ModelError
+from .api_keys import save_key, saved_key
 from .runtime_diagnostics import get_gguf_runtime_diagnostics
 from .system_prompts import SystemPromptError, system_prompt_for_mode
 from .version import VERSION
 from .sequence_routes import register_sequence_routes
 from .sogni_routes import register_sogni_routes
+from .speech import register_speech_routes
 
 
 ROUTE_PREFIX = "/h3studio"
@@ -63,6 +66,8 @@ BACKENDS = {
 GENERATION_CACHE: dict[tuple[str, str], dict[str, Any]] = {}
 GENERATION_CACHE_ACCESS: dict[tuple[str, str], float] = {}
 SESSION_TTL_SECONDS = 24 * 60 * 60
+# Tab media is kept on disk across restarts; drop sessions nobody has opened for a month.
+MEDIA_TTL_SECONDS = 30 * 24 * 60 * 60
 
 
 def _cache_key(session_id: str, mode: str) -> tuple[str, str]:
@@ -153,7 +158,8 @@ async def _cleanup_expired_state(*, now: float | None = None) -> None:
         return
     try:
         current_time = time.monotonic() if now is None else now
-        expired_directories = STORE.expire_sessions(now=current_time, max_age_seconds=SESSION_TTL_SECONDS)
+        # Media access times are wall-clock values because they persist across restarts.
+        expired_directories = STORE.expire_sessions(now=time.time() if now is None else now, max_age_seconds=MEDIA_TTL_SECONDS)
         expired_sessions = {path.name for path in expired_directories}
         expired_cache_keys = {
             key
@@ -618,10 +624,20 @@ async def probe_api_provider(request: web.Request) -> web.Response:
     body = await _json_body(request)
     if body is None:
         return _error("INVALID_REQUEST", "Expected a JSON object.", status=400)
+    credential = body.get("credential") if isinstance(body.get("credential"), dict) else {}
+    typed_key = str(credential.get("value") or "").strip()
     try:
+        preset = str(body.get("preset") or "").strip().lower()
+        if not typed_key:
+            # A blank key field reuses the key saved by an earlier connection.
+            remembered = saved_key(preset, normalize_api_base_url(preset, body.get("base_url")))
+            if remembered:
+                body = {**body, "credential": {**credential, "value": remembered}}
         result = await asyncio.to_thread(API_PROVIDER_BACKEND.probe, body)
     except ModelError as error:
         return _error(error.code, error.message, status=_model_error_status(error), details=error.details)
+    if typed_key:
+        save_key(preset, result["connection"]["base_url"], typed_key)
     return web.json_response(result)
 
 
@@ -644,6 +660,13 @@ async def disconnect_api_provider(request: web.Request) -> web.Response:
     connection_id = str((body or {}).get("connection_id") or "").strip()
     if not connection_id:
         return _error("INVALID_REQUEST", "A provider connection ID is required.", status=400)
+    if (body or {}).get("forget_key"):
+        try:
+            connection = API_PROVIDER_BACKEND.list_models(connection_id, refresh=False)["connection"]
+        except ModelError:
+            connection = None
+        if connection:
+            save_key(connection["preset"], connection["base_url"], "")
     disconnected = await asyncio.to_thread(API_PROVIDER_BACKEND.disconnect, connection_id)
     return web.json_response({"disconnected": disconnected})
 
@@ -1374,7 +1397,12 @@ def _history_error(error: HistoryError) -> web.Response:
 @routes.get(f"{ROUTE_PREFIX}/history")
 async def list_history(_request: web.Request) -> web.Response:
     entries = await asyncio.to_thread(history.list_entries)
-    return web.json_response({"entries": [history.public_entry(entry, ROUTE_PREFIX) for entry in entries]})
+    gens = await asyncio.to_thread(history.list_gens)
+    counts = Counter(gen.get("prompt") for gen in gens)
+    return web.json_response({
+        "entries": [{**history.public_entry(entry, ROUTE_PREFIX), "gen_count": counts[entry["prompt"]]} for entry in entries],
+        "gens": [history.public_gen(gen) for gen in gens],
+    })
 
 
 @routes.post(f"{ROUTE_PREFIX}/history")
@@ -1426,3 +1454,4 @@ async def history_file(request: web.Request) -> web.StreamResponse:
 
 register_sequence_routes(routes, sys.modules[__name__])
 register_sogni_routes(routes, ROUTE_PREFIX)
+register_speech_routes(routes, ROUTE_PREFIX)

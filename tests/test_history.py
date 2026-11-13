@@ -85,6 +85,18 @@ class PromptHistoryTests(unittest.TestCase):
         with self.assertRaises(history.HistoryError):
             history.entry_file(entry["id"], "thumb", 0, root=self.root)
 
+    def test_gens_are_logged_once_newest_first_and_cleared(self):
+        done = {"id": "j1", "status": "completed", "prompt": " P ", "finished_at": 10, "saved_name": "h3_sogni/j1.mp4",
+                "loras": [{"id": "x"}], "network": "relaxed", "resolution": "2k", "duration": 15}
+        history.record_gens([done, {"id": "j2", "prompt": "P"}], root=self.root)
+        history.record_gens([done, {**done, "id": "j3", "finished_at": 20, "saved_name": "h3_sogni/j3.mp4"}], root=self.root)
+        gens = history.list_gens(root=self.root)
+        self.assertEqual([gen["id"] for gen in gens], ["j3", "j1"])
+        self.assertEqual((gens[1]["prompt"], gens[1]["loras"]), ("P", 1))
+        self.assertEqual(history.public_gen(gens[0])["video_url"], "/view?filename=j3.mp4&subfolder=h3_sogni&type=output")
+        history.clear_entries(root=self.root)
+        self.assertEqual(history.list_gens(root=self.root), [])
+
 
 if __name__ == "__main__":
     unittest.main()

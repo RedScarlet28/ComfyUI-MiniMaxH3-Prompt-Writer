@@ -46,6 +46,7 @@ import { createPromptTabs, tabLabel, tabsBarMarkup, videoModeDrafts } from "./pr
 
 import { editMedia } from "./api/h3studio.js";
 import { bindSogni, sogniActionsMarkup } from "./sogni.js";
+import { bindDictation, dictationButtonMarkup } from "./dictation.js";
 
 const EXTENSION_NAME = "minimax.h3.prompt.studio";
 const LAUNCHER_SCHEMA_VERSION = "2";
@@ -390,6 +391,7 @@ function icon(name, size = 16) {
     plus: '<path d="M12 5v14M5 12h14"/>',
     chevron: '<path d="m9 18 6-6-6-6"/>',
     copy: '<rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>',
+    edit: '<path d="M4 20h4L19 9l-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4"/>',
     play: '<path d="m9 7 8 5-8 5V7Z" fill="currentColor" stroke="none"/>',
     pause: '<path d="M8 6v12M16 6v12" stroke-width="3"/>',
     check: '<path d="m5 12 4 4L19 6"/>',
@@ -2265,7 +2267,7 @@ function renderApiProviderControl() {
     <form class="h3ps-api-setup" data-api-provider-form>
       <div class="h3ps-api-intro"><strong>Connect ${selectedPreset.name}</strong><p>One shared Chat Completions backend. Provider-specific fields are applied by the selected preset.</p></div>
       ${config.preset === "custom" ? `<label><span>API base URL</span><input name="base_url" type="url" value="${escapeHtml(config.base_url)}" placeholder="https://host.example/v1 or http://localhost:8000/v1" required><small>Public endpoints require HTTPS; loopback and private LAN addresses may use HTTP.</small></label>` : ""}
-      <label><span>API key ${config.preset === "custom" ? "<em>optional</em>" : ""}</span><input name="api_key" type="password" value="" placeholder="Paste key for this session" autocomplete="off" spellcheck="false" ${config.preset === "custom" ? "" : "required"}><small>The key is sent once to the local H3 backend, kept only in memory, and never saved in localStorage.</small></label>
+      <label><span>API key ${config.preset === "custom" ? "<em>optional</em>" : ""}</span><input name="api_key" type="password" value="" placeholder="Paste key, or leave blank to use the saved one" autocomplete="off" spellcheck="false"><small>After a successful connection the key is saved in your ComfyUI user folder so Writer reconnects on launch. It never goes to browser storage. Disconnect deletes it.</small></label>
       <label><span>Model ID <em>optional before connect</em></span><input name="model_id" type="text" value="${escapeHtml(config.model_id)}" placeholder="Choose from provider list or enter an exact ID" spellcheck="false"></label>
       ${config.preset === "gemini" ? `<label><span>Thinking level</span><select name="gemini_reasoning_effort"><option value="minimal" ${config.gemini_reasoning_effort === "minimal" ? "selected" : ""}>Minimal</option><option value="low" ${config.gemini_reasoning_effort === "low" ? "selected" : ""}>Low</option><option value="medium" ${config.gemini_reasoning_effort === "medium" ? "selected" : ""}>Medium</option><option value="high" ${config.gemini_reasoning_effort === "high" ? "selected" : ""}>High</option></select><small>Gemini manages the reasoning and output budget. Higher levels can use more tokens and take longer.</small></label>` : ""}
       ${config.preset === "custom" ? `<div class="h3ps-api-custom-options"><label><input name="custom_images" type="checkbox" ${config.custom_images ? "checked" : ""}><span>Endpoint accepts image_url inputs</span></label><label><span>Known context <em>optional</em></span><input name="custom_context_tokens" type="number" min="4096" step="1024" value="${config.custom_context_tokens || ""}" placeholder="32768"></label></div>` : ""}
@@ -2904,7 +2906,7 @@ async function connectConfiguredApiProvider(form) {
   }
 }
 
-async function disconnectConfiguredApiProvider({ announce = true } = {}) {
+async function disconnectConfiguredApiProvider({ announce = true, forgetKey = false } = {}) {
   studio.apiConnectionAttempt = (studio.apiConnectionAttempt || 0) + 1;
   const connection = studio.apiProviderConnection;
   const wasSelected = studio.selectedModel?.family === "api";
@@ -2917,10 +2919,10 @@ async function disconnectConfiguredApiProvider({ announce = true } = {}) {
   renderInferenceSettings();
   syncRuntimeSummary();
   saveUserPreferences(localStorage, studio);
-  if (announce) showToast("API provider disconnected", "The session credential was removed from backend memory.");
+  if (announce) showToast("API provider disconnected", forgetKey ? "The saved key was deleted from this computer." : "The connection was closed.");
   if (connection?.id) {
     try {
-      await disconnectApiProvider(connection.id);
+      await disconnectApiProvider(connection.id, { forgetKey });
     } catch {}
   }
 }
@@ -2967,19 +2969,46 @@ async function refreshApiProviderModels() {
   }
 }
 
+// Once per launch, reconnect the remembered provider; the backend supplies the saved key.
+async function restoreApiProviderConnection() {
+  const config = studio.apiProviderConfig;
+  if (studio.apiRestoreTried || studio.apiProviderConnection || !config?.preset || (config.preset === "custom" && !config.base_url)) return null;
+  studio.apiRestoreTried = true;
+  try {
+    return await probeApiProvider({
+      preset: config.preset,
+      base_url: config.base_url,
+      model_id: config.model_id,
+      credential: { source: "session", value: "" },
+      custom_capabilities: { images: config.custom_images, context_tokens: config.custom_context_tokens },
+      provider_options: { reasoning_effort: config.gemini_reasoning_effort },
+    });
+  } catch {
+    return null;
+  }
+}
+
 async function refreshModels() {
   const attempt = (studio.modelDiscoveryAttempt || 0) + 1;
   studio.modelDiscoveryAttempt = attempt;
   const selectionRevision = studio.modelSelectionRevision || 0;
   const externalAttempt = studio.externalConnectionAttempt || 0;
   try {
-    const [result, status, ollamaStatus, apiPresets] = await Promise.all([
+    const [result, status, ollamaStatus, apiPresets, restoredApi] = await Promise.all([
       getModels(),
       getStatus(studio.ollamaHost),
       getOllamaStatus(studio.ollamaHost).catch((error) => ({ state: "error", running: false, compatible_models: [], error: { code: error.code, message: error.message } })),
       getApiProviderPresets().catch(() => ({ presets: [] })),
+      restoreApiProviderConnection(),
     ]);
-    if (studio.modelDiscoveryAttempt !== attempt || (studio.modelSelectionRevision || 0) !== selectionRevision) return;
+    if (studio.modelDiscoveryAttempt !== attempt || (studio.modelSelectionRevision || 0) !== selectionRevision) {
+      if (restoredApi) disconnectApiProvider(restoredApi.connection.id).catch(() => {});
+      return;
+    }
+    if (restoredApi && !studio.apiProviderConnection) {
+      studio.apiProviderConnection = restoredApi.connection;
+      studio.apiProviderModels = restoredApi.models || [];
+    }
     const selectedId = studio.selectedModel?.id;
     const selectedBeforeRefresh = studio.selectedModel;
     const models = [...result.models, ...(ollamaStatus.compatible_models || []), ...studio.apiProviderModels];
@@ -3496,7 +3525,7 @@ function createStudio() {
           </div>
 
           <div class="h3ps-brief h3ps-video-brief">
-            <span><strong>Creative brief</strong><span class="h3ps-brief-tools"><small>Describe what should happen in the video</small>${prefillPickerMarkup(icon)}</span></span>
+            <span><strong>Creative brief</strong><span class="h3ps-brief-tools"><small>Describe what should happen in the video</small>${dictationButtonMarkup()}${prefillPickerMarkup(icon)}</span></span>
             <textarea spellcheck="true" aria-label="Creative brief" data-video-brief>Use identity and wardrobe from Picture 1 and the slow lateral camera movement from Video 1. A solitary character waits at a rain-soaked tram stop at blue hour, notices an approaching light and turns into the wind. End on a quiet, unresolved look; keep the shot cinematic, realistic and restrained.</textarea>
             <small class="h3ps-char-count">0 characters</small>
           </div>
@@ -3680,6 +3709,12 @@ function createStudio() {
     onCopy: (text) => copyPromptText(text),
     notify: (title, message, action = null) => showToast(title, message, null, action),
     isBusy: () => studio.requestBusy,
+  });
+  bindDictation({
+    root,
+    getField: () => root.querySelector("[data-video-brief]"),
+    onChanged: () => { updateBriefLayout(); saveCurrentModeDraft(); },
+    showToast,
   });
   root.querySelector("[data-lyrics-use-brief]").checked = studio.musicLyricsUseBrief;
   const durationSlider = root.querySelector("[data-duration-slider]");
@@ -3964,7 +3999,7 @@ function createStudio() {
       return;
     }
     if (apiDisconnect) {
-      disconnectConfiguredApiProvider();
+      disconnectConfiguredApiProvider({ forgetKey: true });
       return;
     }
     const apiModelRefresh = event.target.closest("[data-api-model-refresh]");

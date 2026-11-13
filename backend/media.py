@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import mimetypes
+import os
 import shutil
 import math
 import time
@@ -13,7 +15,9 @@ import folder_paths
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 
-CACHE_ROOT = Path(folder_paths.get_temp_directory()) / "h3_prompt_studio"
+# Kept in the user directory, not ComfyUI's temp directory, so tab media survives a restart.
+CACHE_ROOT = Path(folder_paths.get_user_directory()) / "h3_prompt_writer" / "media"
+INDEX_NAME = "sessions.json"
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
 AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".m4a", ".ogg", ".aac", ".opus"}
@@ -29,15 +33,6 @@ MODE_LIMITS = {
     "L2VA": {"image": 1},
     "Reference": REFERENCE_LIMITS,
 }
-
-
-def _reset_cache() -> None:
-    if CACHE_ROOT.exists():
-        shutil.rmtree(CACHE_ROOT)
-    CACHE_ROOT.mkdir(parents=True, exist_ok=True)
-
-
-_reset_cache()
 
 
 def parse_session_id(value: str | None) -> str:
@@ -92,11 +87,38 @@ class MediaStore:
         self.last_accessed: dict[str, float] = {}
 
     def touch(self, session_id: str, *, now: float | None = None) -> None:
-        self.last_accessed[session_id] = time.monotonic() if now is None else now
+        self.last_accessed[session_id] = time.time() if now is None else now
+
+    def save(self) -> None:
+        """Write the session index so uploaded media is restored after a restart."""
+        CACHE_ROOT.mkdir(parents=True, exist_ok=True)
+        index = CACHE_ROOT / INDEX_NAME
+        tmp = index.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"sessions": self.sessions, "accessed": self.last_accessed}), encoding="utf-8")
+        os.replace(tmp, index)
+
+    def load(self) -> None:
+        try:
+            data = json.loads((CACHE_ROOT / INDEX_NAME).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = {}
+        accessed = data.get("accessed") or {}
+        for session_id, assets in (data.get("sessions") or {}).items():
+            kept = [asset for asset in assets if Path(asset.get("_original_path", "")).is_file()]
+            if kept:
+                self.sessions[session_id] = kept
+                self.last_accessed[session_id] = accessed.get(session_id, time.time())
+        # Folders left by an upload that never committed (for example a crash mid-upload).
+        for directory in CACHE_ROOT.iterdir() if CACHE_ROOT.is_dir() else ():
+            if directory.is_dir() and directory.name not in self.sessions:
+                shutil.rmtree(directory, ignore_errors=True)
 
     def list(self, session_id: str) -> list[dict[str, Any]]:
         if session_id in self.sessions:
+            stale = time.time() - self.last_accessed.get(session_id, 0) > 24 * 60 * 60
             self.touch(session_id)
+            if stale:  # Keep the saved access time roughly current for expiry after restarts.
+                self.save()
         return [self.public(asset) for asset in self.sessions.get(session_id, [])]
 
     def assets(self, session_id: str) -> list[dict[str, Any]]:
@@ -190,6 +212,7 @@ class MediaStore:
             validate_reference_durations(assets, base)
         assets.append(base)
         self._renumber(assets, mode)
+        self.save()
         return self.public(base)
 
     def _prepare_asset(
@@ -288,6 +311,7 @@ class MediaStore:
         assets[index] = replacement
         self._renumber(assets, old_asset["mode"])
         shutil.rmtree(Path(old_asset["_original_path"]).parent, ignore_errors=True)
+        self.save()
         return self.public(replacement)
 
     def remove(self, session_id: str, asset_id: str) -> None:
@@ -296,11 +320,13 @@ class MediaStore:
         assets.remove(asset)
         shutil.rmtree(Path(asset["_original_path"]).parent, ignore_errors=True)
         self._renumber(assets, asset["mode"])
+        self.save()
 
     def clear(self, session_id: str) -> None:
         self.sessions.pop(session_id, None)
         self.last_accessed.pop(session_id, None)
         shutil.rmtree(CACHE_ROOT / session_id, ignore_errors=True)
+        self.save()
 
     def expire_sessions(
         self,
@@ -319,6 +345,8 @@ class MediaStore:
         for session_id in expired:
             self.sessions.pop(session_id, None)
             self.last_accessed.pop(session_id, None)
+        if expired:
+            self.save()
         return directories
 
     def clear_mode(self, session_id: str, mode: str) -> list[dict[str, Any]]:
@@ -338,6 +366,7 @@ class MediaStore:
         session_dir = CACHE_ROOT / session_id
         if session_dir.exists() and not any(session_dir.iterdir()):
             session_dir.rmdir()
+        self.save()
         return self.list(session_id)
 
     def resample(
@@ -426,6 +455,7 @@ class MediaStore:
         for parent in {path.parent for path in old_paths}:
             if parent != asset_dir and parent.exists() and parent != Path(asset.get("_edited_path") or asset["_original_path"]).parent:
                 shutil.rmtree(parent, ignore_errors=True)
+        self.save()
         return self.public(asset)
 
     def reorder(self, session_id: str, mode: str, ordered_ids: list[str]) -> list[dict[str, Any]]:
@@ -437,6 +467,7 @@ class MediaStore:
         ordered = iter(by_id[asset_id] for asset_id in ordered_ids)
         self.sessions[session_id] = [next(ordered) if asset["mode"] == mode else asset for asset in assets]
         self._renumber(self.sessions[session_id], mode)
+        self.save()
         return self.list(session_id)
 
     def manifest(self, session_id: str, mode: str) -> dict[str, Any]:
@@ -664,3 +695,4 @@ def process_audio(source: Path) -> dict[str, Any]:
 
 
 STORE = MediaStore()
+STORE.load()

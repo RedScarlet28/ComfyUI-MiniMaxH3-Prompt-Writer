@@ -190,6 +190,7 @@ function providerController(overrides = {}) {
   return controller([
     "connectConfiguredApiProvider", "disconnectConfiguredApiProvider", "chooseApiProviderPreset",
     "refreshApiProviderModels", "connectExternalServer", "disconnectExternalServer", "refreshModels",
+    "restoreApiProviderConnection",
   ], {
     studio, localStorage: {}, showToast() {}, renderInferenceSettings() {}, syncRuntimeSummary() {},
     saveUserPreferences() {}, saveApiProviderConfig() {}, saveExternalServerConfig() {},

@@ -51,7 +51,7 @@ def session_media(session_id: str | None, mode: str) -> list[dict[str, Any]]:
         path = asset.get("_edited_path") or asset.get("_original_path")
         if not path or not Path(path).exists():
             raise sogni.SogniError("MEDIA_MISSING", f"{asset.get('filename', 'A reference file')} is no longer available; add it again.")
-        items.append({"type": asset["type"], "path": path, "width": asset.get("width"), "height": asset.get("height"),
+        items.append({"type": asset["type"], "path": path, "width": asset.get("width"), "height": asset.get("height"), "duration": asset.get("duration"),
                       "reference": asset.get("reference"), "filename": asset.get("filename")})
     return items
 
@@ -178,9 +178,23 @@ def register_sogni_routes(routes, prefix: str) -> None:
                 raise sogni.SogniError("JOB_ACTIVE", "Cancel the job before removing it.")
         elif action == "network":
             DISPATCHER.set_network(job_id, (await _body(request)).get("network"))
+        elif action == "move":
+            if not QUEUE.move(job_id, (await _body(request)).get("before")):
+                raise sogni.SogniError("JOB_NOT_WAITING", "Only waiting jobs can be moved.")
         else:
             raise sogni.SogniError("INVALID_REQUEST", "Unknown job action.", status=404)
         return web.json_response(listing())
+
+    @routes.get(f"{base}/jobs/{{job_id}}/thumb")
+    async def get_sogni_job_thumb(request):
+        job = QUEUE.get(request.match_info["job_id"])
+        if job is None:
+            return web.Response(status=404)
+        output = sogni.output_root() / Path(job["saved_name"]).name if job.get("saved_name") else None
+        thumb = await asyncio.to_thread(QUEUE.thumbnail, job["id"], output)
+        if thumb is None:
+            return web.Response(status=404)
+        return web.FileResponse(thumb, headers={"Cache-Control": "max-age=86400"})
 
     # Pick up jobs that were queued or rendering before ComfyUI restarted.
     if any(job["status"] not in {"completed", "failed", "cancelled"} for job in QUEUE.snapshot()):

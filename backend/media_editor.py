@@ -309,4 +309,5 @@ def commit_edit(store, session_id, asset_id, prepared):
     for directory in {Path(p).parent for p in old_paths if p}:
         if directory != source_dir and directory != prepared["directory"] and directory.parent == source_dir:
             shutil.rmtree(directory, ignore_errors=True)
+    store.save()
     return store.public(asset)
